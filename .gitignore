@@ -2,3 +2,5 @@
 *.save
 
 .ipynb_checkpoints
+
+aux/
