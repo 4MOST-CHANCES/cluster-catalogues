@@ -38,6 +38,7 @@ def main():
     cat, mkd = meerkat_diffuse(args, cat)
     #cat, rass = load_rass(args, cat)
     cat, xmm = load_xmm(args, cat)
+    cat, lovoccs = load_lovoccs(args, cat)
     ic(cat)
 
     # add masses
@@ -264,8 +265,17 @@ def load_catalog(args, chances, name):
     gooddec = (cat[cat.base_cols[2]] >= -80) & (cat[cat.base_cols[2]] <= 5)
     cat = Catalog(name, catalog=cat[goodz & gooddec])
     ic(cat)
-    match_catalog(chances, cat)
+    chances, cat = match_catalog(chances, cat)
     return chances, cat
+
+
+def load_lovoccs(args, chances):
+    filename = 'aux/spectroscopic/lovoccs_sample.txt'
+    lovoccs = Catalog(
+        'LoVoCCS', ascii.read(filename, format='basic'),
+        base_cols=('Name','ra','dec','z'))
+    chances, lovoccs = match_catalog(chances, lovoccs)
+    return chances, lovoccs
 
 
 def load_rass(args, chances):
@@ -441,6 +451,9 @@ def summarize_ancillary(args, chances):
     if args.sample == 'lowz':
         aao = (chances['AAOzs'] > 0)
         print(f'{aao.sum()} with AAOzs')
+    lovoccs = (chances['LoVoCCS'] != '')
+    print(f'{lovoccs.sum()} in LoVoCCS:')
+    print(tbl[lovoccs])
     # SZ
     psz = (chances['PSZ2'] != '')
     act = (chances['ACT-DR5'] != '')
