@@ -8,6 +8,7 @@ from icecream import ic
 from matplotlib import pyplot as plt, ticker
 import numpy as np
 from numpy.polynomial import Polynomial, polynomial
+from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit, root, root_scalar
 from scipy.stats import binned_statistic as binstat
 
@@ -118,6 +119,11 @@ def main():
 
     # match CODEX3 to Abell
     abell = Catalog('abell')
+    ic(abell.colnames)
+    # abell.catalog.rename_columns(
+    #     ['Object Name', 'RA(deg)', 'DEC(deg)', 'Redshift'],
+    #     ['name', 'ra', 'dec', 'z'])
+    # abell.base_cols = ['name', 'ra', 'dec', 'z']
     abell.catalog['coords'] = abell.coords
     # abell_matches = abell.query(
     #     ra=codex3['ra']*u.deg, dec=codex3['dec']*u.deg, radius=10*u.arcmin)
@@ -157,11 +163,19 @@ def main():
     splus['dec'] = splus['coords'].dec.deg
 
     act = Catalog('act-dr5')
+    act.catalog['coords'] = act.coords
+    ic(np.sort(act.colnames))
     psz = Catalog('psz2')
+    psz.catalog['coords'] = psz.coords
     # dwellings on the CHANCES selection function
-    ref_level = args.ref_level
-    kwargs = dict(matching=[['CHANCES', chances, 10*u.arcmin]], splus=splus)
+    ref_level = args.ref
+    kwargs = dict(
+        matching=[['CHANCES', chances, 10*u.arcmin],
+                  ['Abell', abell, 10*u.arcmin],
+                  ['ACT-DR5', act, 10*u.arcmin]],
+        splus=splus, Nref=50)
     psz_selected = selfunc(args, psz, ref_level, **kwargs)
+    kwargs['matching'][2] = ['PSZ2', psz, 10*u.arcmin]
     act_selected = selfunc(args, act, ref_level, **kwargs)
     
 
@@ -209,7 +223,8 @@ def main():
 
 
 def completeness(z, richness, z_ref, rich_ref, zbins, lambins,
-                 catlabel, reflabel, sample, output='', ylabel='Richness $\lambda$',
+                 catlabel, reflabel, sample, output='',
+                 ylabel='Richness $\lambda$',
                  xlim=None, ylim=None):
     z0 = (zbins[:-1]+zbins[1:]) / 2
     lam0 = (lambins[:-1]+lambins[1:]) / 2
@@ -296,44 +311,68 @@ def filter_sky(cat, racol, deccol):
     return cat[mask]
 
 
-def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
-            splus=None, cmap='cmr.rainforest_r', cmin=0, cmax=1):
+def selfunc(args, cat, ref_level=0.9, Nref=100,
+            matching=None, footprints=None, splus=None, 
+            cmap='cmr.rainforest_r', cmin=0, cmax=1):
+    """We first calculate a "selection function" using the entire sample
+    over the full sky and then we register only those within the
+    4MOST sky"""
+    ic(cat.dec)
+    ic(cat.b)
+    sky = (cat.dec > -80*u.deg) & (cat.dec < 5*u.deg) \
+        & (np.abs(cat.b) > 20*u.deg)
+    zbins_analysis = np.array([0.07, 0.15, 0.25, 0.35, 0.45])
+    z0_analysis = (zbins_analysis[:-1]+zbins_analysis[1:]) / 2
     cmap = cmr.get_sub_cmap(cmap, cmin, cmax)
     # let's first try to get the selection function
     zbins = np.linspace(0, 0.5, 12)
-    logmbins = np.linspace(-0.7, 1.3, 50)
+    logmbins = np.linspace(-0.7, 1.4, 50)
     z0 = (zbins[:-1] + zbins[1:]) / 2
     logm0 = (logmbins[:-1] + logmbins[1:]) / 2
     mbins = 10**logmbins
     m0 = 10**logm0
-    # raw percentiles
-    per = lambda x: np.percentile(x, 100*ref_level)
-    per = binstat(cat.z, np.log10(cat.mass), statistic=per, bins=zbins).statistic
-    ic(per)
     # maxima
-    maxima = binstat(cat.z, np.log10(cat.mass), statistic=np.max, bins=zbins).statistic
+    maxima = binstat(
+        cat.z, np.log10(cat.mass), statistic=np.max, bins=zbins).statistic
     ic(maxima)
     n_zm = np.histogram2d(cat.z, np.log10(cat.mass), (zbins,logmbins))[0]
     ncum_zm = np.cumsum(n_zm, axis=1) / np.sum(n_zm, axis=1)[:,None]
     # fit an error function to each redshift bin
-    fit = [curve_fit(generalized_erf, logm0, ncum_z, p0=(0.1,0.4))
-           for ncum_z in ncum_zm]
-    fitcov = [i[1] for i in fit]
-    fit = [i[0] for i in fit]
-    ic(fit)
-    model = np.array([generalized_erf(logm0, *x) for x in fit])
-    ic(model.shape)
-    froot = lambda x, *args: generalized_erf(x, *args) - ref_level
-    #ref = [root_scalar(froot, args=tuple(f), x0=0.3, x1=0.4) for f in fit]
-    logmsel = [root(froot, 0.3, tuple(f)).x[0] for f in fit]
-    ic(logmsel)
+    # fit = [curve_fit(generalized_erf, logm0, ncum_z, p0=(0.1,0.4))
+    #        for ncum_z in ncum_zm]
+    # fitcov = [i[1] for i in fit]
+    # fit = [i[0] for i in fit]
+    # ic(fit)
+    # model = np.array([generalized_erf(logm0, *x) for x in fit])
+    # ic(model.shape)
+    # froot = lambda x, *args: generalized_erf(x, *args) - ref_level
+    # #ref = [root_scalar(froot, args=tuple(f), x0=0.3, x1=0.4) for f in fit]
+    # logmsel = [root(froot, 0.3, tuple(f)).x[0] for f in fit]
+    # ic(logmsel)
     # for now... this should be the same as the above but the original
     # logmsel fails for ref_level >~0.5
-    logmsel = per
+    if ref_level == 'ten':
+        ic(zbins_analysis)
+        ic(np.histogram(cat.z[sky], zbins_analysis)[0])
+        # I don't understand why binned_statistic doesn't work
+        logmsel = np.zeros(z0_analysis.size)
+        for i in range(zbins_analysis.size-1):
+            j = (cat.z[sky] >= zbins_analysis[i]) \
+                & (cat.z[sky] < zbins_analysis[i+1])
+            logmsel[i] = np.log10(np.sort(cat.mass[sky][j])[-10])
+    else:
+        # raw percentiles
+        per = lambda x: np.percentile(x, 100*ref_level)
+        per = binstat(
+            cat.z, np.log10(cat.mass),
+            statistic=per, bins=zbins).statistic
+        ic(per)
+        logmsel = per
     msel = 10**np.array(logmsel)
     ic(msel)
     # let's try to fit a polynomial to our "mass limit"
-    pfit = np.squeeze(polynomial.polyfit(z0, logmsel, 3))
+    zfit = z0_analysis if ref_level == 'ten' else z0
+    pfit = np.squeeze(polynomial.polyfit(zfit, logmsel, 3))
     ic(pfit)
     def p(x):
         """log-space polynomial fit to the poor-man's selection function"""
@@ -346,34 +385,37 @@ def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
     ax.set(ylabel='$M_\mathrm{SZ}$ ($10^{14}$ M$_\odot$)')
     im = ax.pcolormesh(zbins, mbins, ncum_zm.T, vmin=0, vmax=1, cmap=cmap)
     plt.colorbar(im, ax=ax, label='$N(<M_\mathrm{SZ}|z)$ / $N(z)$')
-    c = 'k' if ref_level < 0.5 else 'w'
-    ax.plot(z0, msel, f'{c}-', lw=4)
+    if ref_level == 'ten':
+        c = 'w'
+    else:
+        c = 'k' if ref_level < 0.5 else 'w'
+    ax.plot(zfit, msel, f'{c}-', lw=4)
     ax.plot(z0, p(z0), f'{c}--', lw=4)
     ax = axes[1]
-    ax.scatter(cat.z, cat.mass, marker='o', c='C0', zorder=-1)
-    ax.plot(z0, msel, 'C3-', lw=4, zorder=0)
-    ax.plot(z0, p(z0), 'C3--', lw=4, zorder=0)
+    ax.scatter(cat.z, cat.mass, marker='.', c='0.5', s=4, zorder=-2)
+    ax.scatter(cat.z[sky], cat.mass[sky], marker='o', c='C0', zorder=-1)
+    ax.plot(zfit, msel, 'C3-', lw=3, zorder=0)
+    ax.plot(z0, p(z0), 'C3--', lw=3, zorder=0)
     # let's find a cut that will give us 50 clusters in the desired redshift range
-    msk = (cat.z > 0.07) & (cat.z < 0.45)
-    cref = 1
+    msk = sky & (cat.z > 0.07) & (cat.z < 0.45)
+    cref = 0.5
+    ic(Nref)
     while (msk & (cat.mass > cref*p(cat.z))).sum() > Nref:
-        cref *= 1.05
+        cref *= 1.01
     msk_ev = msk & (cat.mass > cref*p(cat.z))
     ic(cref, msk_ev.sum())
     ax.plot(z0, cref*p(z0), 'C3-', lw=2, zorder=0)
     ax.scatter(cat.z[msk_ev], cat.mass[msk_ev], marker='x', c='C1', s=25, lw=2,
                label=f'N={msk_ev.sum()}')
     msk_lo = (cat.mass > cref*p(cat.z)) & (cat.z > 0) & (cat.z < 0.07)
-    ax.scatter(cat.z[msk_lo], cat.mass[msk_lo], marker='+', c='C2', s=25, lw=2,
-               label=f'N={msk_lo.sum()}')
+    # ax.scatter(cat.z[msk_lo], cat.mass[msk_lo], marker='+', c='C2', s=25, lw=2,
+    #            label=f'N={msk_lo.sum()}')
     if args.sample == 'evolution':
-        zbins_analysis = np.array([0.07, 0.15, 0.25, 0.35, 0.45])
-        z0 = (zbins_analysis[:-1]+zbins_analysis[1:]) / 2
         for zb in zbins_analysis:
             ax.axvline(zb, ls='--', color='k', lw=1)
         Nz = np.histogram(cat.z[msk_ev], zbins_analysis)[0]
         ic(Nz, Nz.shape)
-        for zi, Nz_i in zip(z0, Nz):
+        for zi, Nz_i in zip(z0_analysis, Nz):
             ax.annotate(f'{Nz_i:.0f}', xy=(zi,20), ha='center', va='center',
                         fontsize=12)
     ax.set(xlim=(0, 0.5))
@@ -386,7 +428,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
     N = tbl['ra'].size
     tbl['ra'].format = '.5f'
     tbl['dec'].format = '.5f'
-    tbl['z'].format = '.2f'
+    tbl['z'].format = '.3f'
     tbl['mass'].format = '.2f'
     tbl.sort('ra')
     coords = SkyCoord(ra=tbl['ra'], dec=tbl['dec'], unit='deg')
@@ -403,10 +445,10 @@ def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
         print(f'{in_splus.sum()}/{N} clusters in S-PLUS')
         axes[1].scatter(
             tbl['z'][in_splus], tbl['mass'][in_splus], c='C9', marker='.',
-            label=f'in S-PLUS (N={in_splus.sum()})')
+            label=f'in S-PLUS (N={in_splus.sum()})', zorder=10)
     if matching is not None:
         matches = {}
-        for cname, mcat, maxsep in matching:
+        for (cname, mcat, maxsep), marker in zip(matching, 'osp^v'):
             sep = coords.separation(mcat['coords'][:,None])
             minsep = np.min(sep, axis=0)
             closest = np.argmin(sep, axis=0)
@@ -415,9 +457,11 @@ def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
             tbl[cname] = [mcat['name'][cl] if ms < maxsep else ''
                           for cl, ms in zip(closest, minsep)]
             matches[cname] = (tbl[cname] != '')
+            if cname == 'Abell':
+                continue
             axes[1].plot(
                 tbl['z'][matches[cname]], tbl['mass'][matches[cname]],
-                'ko', ms=12, mfc='none', mew=2,
+                f'k{marker}', ms=12, mfc='none', mew=2, zorder=0,
                 label=f'in {cname} (N={matches[cname].sum()})')
             
     if footprints is not None:
@@ -425,7 +469,11 @@ def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
             tbl[f'in_{fp.name}'] = fp.in_footprint(tbl['ra'], tbl['dec'])
     axes[1].legend(fontsize=12, loc='lower right')
     # save figure and table
-    output = f'masscounts_{cat.name}_{100*ref_level:.0f}'
+    output = f'masscounts_{cat.name}'
+    if ref_level == 'ten':
+        output = f'{output}_ten'
+    else:
+        output = f'{output}_{100*ref_level:.0f}'
     savefig(f'plots/{output}.png', fig=fig, tight=False)
     tbl.write(f'output/{output}.txt', format='ascii.fixed_width', overwrite=True)
     return tbl
@@ -438,10 +486,12 @@ def parse_args():
         '--catalog', type=str,
         default='aux/xray/codex_eromapper_catalog_fixedcodex.fit')
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--ref-level', default=0.9, type=float)
+    parser.add_argument('--ref', default=0.9)
     args = parser.parse_args()
     if not args.debug:
         ic.disable()
+    if args.ref != 'ten':
+        args.ref = args.ref = float(args.ref)
     return args
 
 main()
