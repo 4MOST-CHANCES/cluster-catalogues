@@ -419,6 +419,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100, matching=None, footprints=None,
                 tbl['z'][matches[cname]], tbl['mass'][matches[cname]],
                 'ko', ms=12, mfc='none', mew=2,
                 label=f'in {cname} (N={matches[cname].sum()})')
+            
     if footprints is not None:
         for fp in footprints:
             tbl[f'in_{fp.name}'] = fp.in_footprint(tbl['ra'], tbl['dec'])
