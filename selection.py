@@ -173,7 +173,7 @@ def main():
         matching=[['CHANCES', chances, 10*u.arcmin],
                   ['Abell', abell, 10*u.arcmin],
                   ['ACT-DR5', act, 10*u.arcmin]],
-        splus=splus, Nref=50)
+        splus=splus, Nref=30)
     psz_selected = selfunc(args, psz, ref_level, **kwargs)
     kwargs['matching'][2] = ['PSZ2', psz, 10*u.arcmin]
     act_selected = selfunc(args, act, ref_level, **kwargs)
@@ -317,12 +317,13 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     """We first calculate a "selection function" using the entire sample
     over the full sky and then we register only those within the
     4MOST sky"""
-    ic(cat.dec)
-    ic(cat.b)
     sky = (cat.dec > -80*u.deg) & (cat.dec < 5*u.deg) \
         & (np.abs(cat.b) > 20*u.deg)
+    ic(sky.size, sky.sum())
     zbins_analysis = np.array([0.07, 0.15, 0.25, 0.35, 0.45])
     z0_analysis = (zbins_analysis[:-1]+zbins_analysis[1:]) / 2
+    zmask = (cat.z >= zbins_analysis[0]) & (cat.z <= zbins_analysis[-1])
+    ic(zmask.size, zmask.sum())
     cmap = cmr.get_sub_cmap(cmap, cmin, cmax)
     # let's first try to get the selection function
     zbins = np.linspace(0, 0.5, 12)
@@ -359,7 +360,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
         for i in range(zbins_analysis.size-1):
             j = (cat.z[sky] >= zbins_analysis[i]) \
                 & (cat.z[sky] < zbins_analysis[i+1])
-            logmsel[i] = np.log10(np.sort(cat.mass[sky][j])[-10])
+            logmsel[i] = np.log10(np.sort(cat.mass[sky][j])[-Nref//4])
     else:
         # raw percentiles
         per = lambda x: np.percentile(x, 100*ref_level)
@@ -378,59 +379,95 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
         """log-space polynomial fit to the poor-man's selection function"""
         p = Polynomial(pfit)
         return 10**p(x)
+    # let's find a cut that will give us Nref clusters in the desired
+    # redshift range
+    msk = sky & zmask
+    cref = 0.5
+    ic(Nref)
+    while (msk & (cat.mass > cref*p(cat.z))).sum() > Nref:
+        cref *= 1.01
+    cref_lo = 0.5*cref
+    massmask = (cat.mass > cref*p(cat.z))
+    ic(cref, massmask.sum())
     # plot!
-    fig, axes = plt.subplots(
-        1, 2, figsize=(12,5), constrained_layout=True)
+    # fig, axes = plt.subplots(
+    #     1, 3, figsize=(18,5), constrained_layout=True)
+    fig = plt.figure(figsize=(12, 9), layout='constrained')
+    spec = fig.add_gridspec(2, 2, width_ratios=[0.4,0.6])
+    axes = [fig.add_subplot(spec[0,0]), fig.add_subplot(spec[0,1]),
+            fig.add_subplot(spec[1,:])]
+    ic(axes)
+    # percentiles
     ax = axes[0]
     ax.set(ylabel='$M_\mathrm{SZ}$ ($10^{14}$ M$_\odot$)')
     im = ax.pcolormesh(zbins, mbins, ncum_zm.T, vmin=0, vmax=1, cmap=cmap)
-    plt.colorbar(im, ax=ax, label='$N(<M_\mathrm{SZ}|z)$ / $N(z)$')
+    plt.colorbar(im, ax=ax, label='$N(<M_\mathrm{SZ}|z)$ / $N(z)$',
+                 fraction=0.05, pad=0)
     if ref_level == 'ten':
         c = 'w'
     else:
         c = 'k' if ref_level < 0.5 else 'w'
     ax.plot(zfit, msel, f'{c}-', lw=4)
     ax.plot(z0, p(z0), f'{c}--', lw=4)
-    ax = axes[1]
-    ax.scatter(cat.z, cat.mass, marker='.', c='0.5', s=4, zorder=-2)
-    ax.scatter(cat.z[sky], cat.mass[sky], marker='o', c='C0', zorder=-1)
-    ax.plot(zfit, msel, 'C3-', lw=3, zorder=0)
-    ax.plot(z0, p(z0), 'C3--', lw=3, zorder=0)
-    # let's find a cut that will give us 50 clusters in the desired redshift range
-    msk = sky & (cat.z > 0.07) & (cat.z < 0.45)
-    cref = 0.5
-    ic(Nref)
-    while (msk & (cat.mass > cref*p(cat.z))).sum() > Nref:
-        cref *= 1.01
-    msk_ev = msk & (cat.mass > cref*p(cat.z))
-    ic(cref, msk_ev.sum())
-    ax.plot(z0, cref*p(z0), 'C3-', lw=2, zorder=0)
-    ax.scatter(cat.z[msk_ev], cat.mass[msk_ev], marker='x', c='C1', s=25, lw=2,
-               label=f'N={msk_ev.sum()}')
+    # data points
+    good = (sky & zmask & massmask)
+    ra = cat.ra.copy()
+    #if cat.name == 'act-dr5':
+    ra[ra > 180*u.deg] -= 360*u.deg
+    for ax, x, y in zip(axes[1:], (cat.z, ra), (cat.mass, cat.dec)):
+        ax.scatter(x[~good], y[~good],
+                   marker='.', c='0.6', s=3, zorder=-2)
+        ax.plot(
+            x[good], y[good],
+            'o', mec='C0', mfc='none', mew=3, zorder=0)
+        ax.scatter(
+            x[sky & zmask & ~massmask], y[sky & zmask & ~massmask], marker='x',
+            c='C9', s=4, zorder=-1)
+    axes[1].plot(zfit, msel, 'C3-', lw=3, zorder=0)
+    axes[1].plot(z0, p(z0), 'C3--', lw=3, zorder=0)
+    axes[1].plot(z0, cref*p(z0), 'C3-', lw=2, zorder=0)
+    axes[1].plot(z0, cref_lo*p(z0), 'C3-', lw=1, zorder=0)
+    #ax.scatter(cat.z[msk_ev], cat.mass[msk_ev], marker='x', c='C1', s=25, lw=2,
+               #label=f'N={msk_ev.sum()}')
+    # for reference
     msk_lo = (cat.mass > cref*p(cat.z)) & (cat.z > 0) & (cat.z < 0.07)
     # ax.scatter(cat.z[msk_lo], cat.mass[msk_lo], marker='+', c='C2', s=25, lw=2,
     #            label=f'N={msk_lo.sum()}')
     if args.sample == 'evolution':
+        ax = axes[1]
+        # number of clusters selected in each bin
         for zb in zbins_analysis:
             ax.axvline(zb, ls='--', color='k', lw=1)
-        Nz = np.histogram(cat.z[msk_ev], zbins_analysis)[0]
+        Nz = np.histogram(
+            cat.z[sky & zmask &massmask], zbins_analysis)[0]
         ic(Nz, Nz.shape)
         for zi, Nz_i in zip(z0_analysis, Nz):
             ax.annotate(f'{Nz_i:.0f}', xy=(zi,20), ha='center', va='center',
                         fontsize=12)
     ax.set(xlim=(0, 0.5))
-    for ax in axes:
+    for ax in axes[:2]:
         ax.set(xlabel='Redshift', yscale='log', ylim=(1,24))
         ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%d'))
+    axes[2].set(
+        xlabel='RA (deg)', ylabel='Dec (deg)', ylim=(-90, 25))
+    # if cat.name == 'act-dr5':
+    #     axes[2].set(ylim=(-70, 30))
+    
     tbl = Table({'name': cat.obj, 'ra': cat.ra, 'dec': cat.dec, 'z': cat.z,
-                 'mass': cat.mass})
-    tbl = tbl[msk_ev | msk_lo]
+                 'gal_l': cat.l, 'mass': cat.mass, 'complete': massmask})
+    #tbl = tbl[msk_ev | msk_lo]
+    tbl = tbl[sky & zmask]
     N = tbl['ra'].size
     tbl['ra'].format = '.5f'
     tbl['dec'].format = '.5f'
     tbl['z'].format = '.3f'
+    tbl['gal_l'].format = '.2f'
     tbl['mass'].format = '.2f'
     tbl.sort('ra')
+    tbl['lowmass'] = (tbl['mass'] >= cref_lo*p(tbl['z'])) & ~tbl['complete']
+    tra = tbl['ra']
+    #if cat.name == 'act-dr5':
+    tra[tra > 180] -= 360
     coords = SkyCoord(ra=tbl['ra'], dec=tbl['dec'], unit='deg')
     # match SPLUS
     if splus:
@@ -439,13 +476,26 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
         closest = np.argmin(sep, axis=0)
         ic(coords.shape, sep.shape, minsep.shape)
         ic(minsep)
-        tbl['S-PLUS'] = [splus['NAME'][cl] if ms < 1*u.deg else 'NO'
+        tbl['S-PLUS'] = [splus['NAME'][cl] if ms < 1*u.deg else ''
                           for cl, ms in zip(closest, minsep)]
-        in_splus = (tbl['S-PLUS'] != 'NO')
+        in_splus = (tbl['S-PLUS'] != '')
         print(f'{in_splus.sum()}/{N} clusters in S-PLUS')
-        axes[1].scatter(
-            tbl['z'][in_splus], tbl['mass'][in_splus], c='C9', marker='.',
-            label=f'in S-PLUS (N={in_splus.sum()})', zorder=10)
+        sample_masks = [
+            (in_splus & tbl['complete']),
+            (in_splus & tbl['lowmass']),
+            (in_splus & ~tbl['complete'] & ~tbl['lowmass'])]
+        n0, n1, n2 = [m.sum() for m in sample_masks]
+        kwargs = dict(
+            marker='.', label=f'in S-PLUS (N={n0}/{n1}/{n2})', zorder=10)
+        for i, (m, c, s) \
+                in enumerate(zip(
+                    sample_masks, ('C1', 'C1', 'C2'), (25, 25, 20))):
+            kwargs['c'] = c
+            kwargs['s'] = s
+            if i >= 1:
+                kwargs['label'] = '_none_'
+            axes[1].scatter(tbl['z'][m], tbl['mass'][m], **kwargs)
+            axes[2].scatter(tra[m], tbl['dec'][m], **kwargs)
     if matching is not None:
         matches = {}
         for (cname, mcat, maxsep), marker in zip(matching, 'osp^v'):
@@ -459,11 +509,19 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
             matches[cname] = (tbl[cname] != '')
             if cname == 'Abell':
                 continue
+            n1 = (matches[cname] & tbl['complete']).sum()
+            n2 = (matches[cname] & ~tbl['complete']).sum()
+            kwargs = dict(
+                ms=12, mfc='none', mew=2, zorder=0,
+                label=f'in {cname} (N={n1}/{n2})')
+            if cname != 'CHANCES':
+                continue
             axes[1].plot(
                 tbl['z'][matches[cname]], tbl['mass'][matches[cname]],
-                f'k{marker}', ms=12, mfc='none', mew=2, zorder=0,
-                label=f'in {cname} (N={matches[cname].sum()})')
-            
+                f'k{marker}', **kwargs)
+            axes[2].plot(
+                tra[matches[cname]], tbl['dec'][matches[cname]],
+                f'k{marker}', **kwargs)
     if footprints is not None:
         for fp in footprints:
             tbl[f'in_{fp.name}'] = fp.in_footprint(tbl['ra'], tbl['dec'])
