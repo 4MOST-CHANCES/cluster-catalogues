@@ -1,6 +1,7 @@
 import argparse
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from astropy.cosmology import Planck18 as cosmo
 from astropy.io import ascii, fits
 from astropy.table import Table, join, join_skycoord
 import cmasher as cmr
@@ -19,6 +20,9 @@ from astro.clusters import Catalog, catalogs
 from astro.footprint import Footprint
 from stattools import generalized_erf
 
+# local
+from collate_info import calculate_m200_from_m500
+
 
 def main():
     args = parse_args()
@@ -30,11 +34,11 @@ def main():
     cat = codex3
     ic(np.sort(cat.colnames))
     ic((cat['M200c'] == 0).sum())
-    codex = Table(fits.open(
+    eromapper = Table(fits.open(
         'aux/xray/codex_eromapper_catalog_fixedcodex.fit')[1].data)
-    codex = filter_sky(codex, 'ra', 'dec')
-    ic(np.sort(codex.colnames))
-    #codex = codex[codex['codex10']]
+    eromapper = filter_sky(eromapper, 'ra', 'dec')
+    ic(np.sort(eromapper.colnames))
+    #eromapper = eromapper[eromapper['codex10']]
     xmass = Table(fits.open(
         'aux/xray/Xmass_BayesGroups_n3ext200kpc_nofake_info.fits')[1].data)
     ic(np.sort(xmass.colnames))
@@ -67,8 +71,8 @@ def main():
     c = ax.scatter(cat['lambda'][mask], cat['M200c'][mask], marker='.',
                    label='CODEX3', c=cat['best_z'][mask])
     plt.colorbar(c, ax=ax, label='Redshift')
-    # ax.scatter(codex['lambda'][matches_codex], codex['M200c'][matches_codex],
-    #            marker='x', label='extended X-ray in CODEX-10')
+    # ax.scatter(eromapper['lambda'][matches_eromapper], eromapper['M200c'][matches_eromapper],
+    #            marker='x', label='extended X-ray in eromapper-10')
     #ax.legend(fontsize=12)
     # ax.set(#xlabel='Redshift $z$', ylabel=r'Richness $\lambda$',
     #        xlim=(0, 0.08))
@@ -84,15 +88,16 @@ def main():
         lambins = np.array([1, 2, 3, 5, 8, 10, 20])
     ic(zbins, lambins)
     completeness(
-        cat['best_z'], cat['lambda'], codex['best_z'], codex['lambda'],
-        zbins, lambins, 'codex3_lsdr10', 'codex', sample)
+        cat['best_z'], cat['lambda'], eromapper['best_z'], eromapper['lambda'],
+        zbins, lambins, 'codex3_lsdr10', 'eromapper', sample)
 
     # Original CHANCES catalog
     chances = ascii.read(
-        f'catalogues/chances_clusters_{sample}.txt', format='fixed_width')
+        f'catalogues/clusters_chances_{sample}.txt', format='fixed_width')
     chances.remove_column('coords')
-    chances.rename_column('Cluster Name', 'name')
-    chances = filter_sky(chances, 'RA_J2000', 'Dec_J2000')
+    # chances.rename_columns(
+    #     ['Cluster Name', 'RA_J2000', 'Dec_J2000'], ['name', 'ra', 'dec'])
+    chances = filter_sky(chances, 'ra', 'dec')
     with_matches, matches, mindist = crossmatch(chances, codex3)
     chances['lambda'] = np.zeros(chances['coords'].size)
     chances['lambda'][with_matches] = codex3['lambda'][matches]
@@ -107,7 +112,7 @@ def main():
     cx = codex3['CODEX3','ra','dec','best_z','lambda']
     if sample == 'lowz':
         m = (chances['z'] < 0.045) & (chances['lambda'] > 40)
-        print(chances['name','RA_J2000','Dec_J2000','z','lambda'][m])
+        print(chances['name','ra','dec','z','lambda'][m])
         m1 = (codex3['best_z'] < 0.045) & (codex3['lambda'] > 40)
         print(cx[m1])
         print(cx[matches][chances['name'][with_matches] == 'A0536'])
@@ -120,13 +125,7 @@ def main():
     # match CODEX3 to Abell
     abell = Catalog('abell')
     ic(abell.colnames)
-    # abell.catalog.rename_columns(
-    #     ['Object Name', 'RA(deg)', 'DEC(deg)', 'Redshift'],
-    #     ['name', 'ra', 'dec', 'z'])
-    # abell.base_cols = ['name', 'ra', 'dec', 'z']
     abell.catalog['coords'] = abell.coords
-    # abell_matches = abell.query(
-    #     ra=codex3['ra']*u.deg, dec=codex3['dec']*u.deg, radius=10*u.arcmin)
     matches = crossmatch(codex3, abell.catalog)
     codex3['abell'] = codex3['coords'].size * [11*' ']
     codex3['abell'][matches[0]] = abell.obj[matches[1]]
@@ -151,9 +150,32 @@ def main():
     print(mask.size, mask.sum())
     print(xm[mask])
 
-    # to WINGS
-    # wings = Catalog('wings')
-    # wings.catalog = filter_sky(wings.catalog, )
+    # some other catalogs of interest
+    lovoccs = ascii.read(
+        'aux/spectroscopic/lovoccs_sample.txt', format='basic')
+    lovoccs = filter_sky(lovoccs, 'ra', 'dec')
+    lovoccs = Catalog(
+        'lovoccs', lovoccs, label='LoVoCCS',
+        base_cols=['Name','ra','dec','z'])
+    meerkat = ascii.read('aux/meerkat/meerkat_legacy.csv', format='csv')
+    meerkat = filter_sky(meerkat, 'ra', 'dec')
+    meerkat = Catalog('meerkat', meerkat, label='MeerKAT')
+    hiflugcs = ascii.read('aux/xray/hiflugcs_sample.txt', format='cds')
+    hiflugcs = filter_sky(hiflugcs, 'RAdeg', 'DEdeg')
+    hiflugcs = Catalog(
+        'hiflugcs', hiflugcs, base_cols=('CName','RAdeg','DEdeg','z'),
+        label='HIFLUGCS')
+    if sample == 'lowz':
+        wings = ascii.read(
+            'aux/xray/wings.txt', format='fixed_width')
+        wings['coords'] = SkyCoord(
+            ra=wings['hms'], dec=wings['dms'], unit=(u.hourangle, u.deg))
+        wings['ra'] = wings['coords'].ra.deg
+        wings['dec'] = wings['coords'].dec.deg
+        wings = filter_sky(wings, 'ra', 'dec')
+        wings = Catalog(
+            'wings', wings, label='WINGS', base_cols=('Cluster','ra','dec','z'),
+            masscol='Lx_1e44')
 
     splus = ascii.read('../splus/S-PLUS_footprint.csv', format='csv')
     splus.rename_columns(['RA', 'DEC'], ['hms', 'dms'])
@@ -167,16 +189,34 @@ def main():
     ic(np.sort(act.colnames))
     psz = Catalog('psz2')
     psz.catalog['coords'] = psz.coords
+    codex = Table(
+        fits.open('aux/xray/codex_LSDR10_flux_info50.fits')[1].data)
+    codex = Catalog(
+        'codex', codex, base_cols=('CODEX', 'RA_X', 'Dec_X', 'z_best'),
+        label='CODEX', masscol='lambda')
+    codex.catalog['coords'] = codex.coords
     # dwellings on the CHANCES selection function
     ref_level = args.ref
+    if 'max' in ref_level:
+        Nref = int(ref_level[3:])
+    else:
+        Nref = 30
     kwargs = dict(
         matching=[['CHANCES', chances, 10*u.arcmin],
                   ['Abell', abell, 10*u.arcmin],
-                  ['ACT-DR5', act, 10*u.arcmin]],
-        splus=splus, Nref=30)
+                  ['CODEX', codex, 10*u.arcmin],
+                  ['ACT-DR5', act, 10*u.arcmin],
+                  ['PSZ2', psz, 10*u.arcmin],
+                  ['LoVoCCS', lovoccs, 10*u.arcmin],
+                  ['HIFLUGCS', hiflugcs, 10*u.arcmin],
+                  ['MeerKAT', meerkat, 10*u.arcmin],
+                  ],
+        splus=splus, Nref=Nref)
+    if sample == 'lowz':
+        kwargs['matching'].append(['WINGS', wings, 10*u.arcmin])
     psz_selected = selfunc(args, psz, ref_level, **kwargs)
-    kwargs['matching'][2] = ['PSZ2', psz, 10*u.arcmin]
     act_selected = selfunc(args, act, ref_level, **kwargs)
+    codex_selected = selfunc(args, codex, ref_level, **kwargs)
     
 
     return
@@ -327,7 +367,10 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     cmap = cmr.get_sub_cmap(cmap, cmin, cmax)
     # let's first try to get the selection function
     zbins = np.linspace(0, 0.5, 12)
-    logmbins = np.linspace(-0.7, 1.4, 50)
+    if cat.name in ('act-dr5', 'psz2'):
+        logmbins = np.linspace(-0.7, 1.4, 50)
+    elif cat.name == 'codex':
+        logmbins = np.linspace(0.7, 2.7, 50)
     z0 = (zbins[:-1] + zbins[1:]) / 2
     logm0 = (logmbins[:-1] + logmbins[1:]) / 2
     mbins = 10**logmbins
@@ -352,7 +395,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     # ic(logmsel)
     # for now... this should be the same as the above but the original
     # logmsel fails for ref_level >~0.5
-    if ref_level == 'ten':
+    if 'max' in ref_level:
         ic(zbins_analysis)
         ic(np.histogram(cat.z[sky], zbins_analysis)[0])
         # I don't understand why binned_statistic doesn't work
@@ -372,7 +415,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     msel = 10**np.array(logmsel)
     ic(msel)
     # let's try to fit a polynomial to our "mass limit"
-    zfit = z0_analysis if ref_level == 'ten' else z0
+    zfit = z0_analysis if 'max' in ref_level else z0
     pfit = np.squeeze(polynomial.polyfit(zfit, logmsel, 3))
     ic(pfit)
     def p(x):
@@ -388,6 +431,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
         cref *= 1.01
     cref_lo = 0.5*cref
     massmask = (cat.mass > cref*p(cat.z))
+    massmask_low = ~massmask & (cat.mass > cref_lo*p(cat.z))
     ic(cref, massmask.sum())
     # plot!
     # fig, axes = plt.subplots(
@@ -403,7 +447,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     im = ax.pcolormesh(zbins, mbins, ncum_zm.T, vmin=0, vmax=1, cmap=cmap)
     plt.colorbar(im, ax=ax, label='$N(<M_\mathrm{SZ}|z)$ / $N(z)$',
                  fraction=0.05, pad=0)
-    if ref_level == 'ten':
+    if 'max' in ref_level:
         c = 'w'
     else:
         c = 'k' if ref_level < 0.5 else 'w'
@@ -420,9 +464,10 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
         ax.plot(
             x[good], y[good],
             'o', mec='C0', mfc='none', mew=3, zorder=0)
-        ax.scatter(
-            x[sky & zmask & ~massmask], y[sky & zmask & ~massmask], marker='x',
-            c='C9', s=4, zorder=-1)
+        msk = sky & zmask & massmask_low
+        ax.scatter(x[msk], y[msk], marker='o', c='C1', s=4, zorder=-1)
+        msk = sky & zmask & ~(massmask | massmask_low)
+        ax.scatter(x[msk], y[msk], marker='o', c='C2', s=3, zorder=-1)
     axes[1].plot(zfit, msel, 'C3-', lw=3, zorder=0)
     axes[1].plot(z0, p(z0), 'C3--', lw=3, zorder=0)
     axes[1].plot(z0, cref*p(z0), 'C3-', lw=2, zorder=0)
@@ -445,13 +490,12 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
             ax.annotate(f'{Nz_i:.0f}', xy=(zi,20), ha='center', va='center',
                         fontsize=12)
     ax.set(xlim=(0, 0.5))
+    ylim = (5, 300) if cat.name == 'codex' else (1, 24)
     for ax in axes[:2]:
-        ax.set(xlabel='Redshift', yscale='log', ylim=(1,24))
+        ax.set(xlabel='Redshift', yscale='log', ylim=ylim)
         ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%d'))
     axes[2].set(
         xlabel='RA (deg)', ylabel='Dec (deg)', ylim=(-90, 25))
-    # if cat.name == 'act-dr5':
-    #     axes[2].set(ylim=(-70, 30))
     
     tbl = Table({'name': cat.obj, 'ra': cat.ra, 'dec': cat.dec, 'z': cat.z,
                  'gal_l': cat.l, 'mass': cat.mass, 'complete': massmask})
@@ -465,6 +509,20 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     tbl['mass'].format = '.2f'
     tbl.sort('ra')
     tbl['lowmass'] = (tbl['mass'] >= cref_lo*p(tbl['z'])) & ~tbl['complete']
+    # from previous analyses
+    if cat.name in ('act-dr5', 'psz2'):
+        if cat.name == 'psz2':
+            tbl['mass'] *= 10**0.13
+        for key in 'mcrd':
+            tbl[f'{key}200'] = np.zeros(tbl['name'].size)
+        with_zmass = (tbl['mass'] > 0) & (tbl['z'] > 0)
+        tbl['m200'][with_zmass], tbl['c200'][with_zmass], \
+            tbl['r200'][with_zmass], tbl['d200'][with_zmass] \
+                = calculate_m200_from_m500(
+                    1e14*tbl['mass'][with_zmass], tbl['z'][with_zmass], cosmo=cosmo)
+        tbl['m200'] /= 1e14
+        for key in 'mcrd':
+            tbl[f'{key}200'].format = '.2f'
     tra = tbl['ra']
     #if cat.name == 'act-dr5':
     tra[tra > 180] -= 360
@@ -487,18 +545,21 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
         n0, n1, n2 = [m.sum() for m in sample_masks]
         kwargs = dict(
             marker='.', label=f'in S-PLUS (N={n0}/{n1}/{n2})', zorder=10)
-        for i, (m, c, s) \
-                in enumerate(zip(
-                    sample_masks, ('C1', 'C1', 'C2'), (25, 25, 20))):
-            kwargs['c'] = c
-            kwargs['s'] = s
-            if i >= 1:
-                kwargs['label'] = '_none_'
-            axes[1].scatter(tbl['z'][m], tbl['mass'][m], **kwargs)
-            axes[2].scatter(tra[m], tbl['dec'][m], **kwargs)
+        if args.sample == 'lowz':
+            for i, (m, c, s) \
+                    in enumerate(zip(
+                        sample_masks, ('C2', 'C2', 'C9'), (25, 25, 20))):
+                kwargs['c'] = c
+                kwargs['s'] = s
+                if i >= 1:
+                    kwargs['label'] = '_none_'
+                axes[1].scatter(tbl['z'][m], tbl['mass'][m], **kwargs)
+                axes[2].scatter(tra[m], tbl['dec'][m], **kwargs)
     if matching is not None:
         matches = {}
-        for (cname, mcat, maxsep), marker in zip(matching, 'osp^v'):
+        for (cname, mcat, maxsep), marker in zip(matching, 'osp^v<>8D'):
+            if cname.lower() == cat.name:
+                continue
             sep = coords.separation(mcat['coords'][:,None])
             minsep = np.min(sep, axis=0)
             closest = np.argmin(sep, axis=0)
@@ -528,8 +589,8 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     axes[1].legend(fontsize=12, loc='lower right')
     # save figure and table
     output = f'masscounts_{cat.name}'
-    if ref_level == 'ten':
-        output = f'{output}_ten'
+    if 'max' in ref_level:
+        output = f'{output}_{ref_level}'
     else:
         output = f'{output}_{100*ref_level:.0f}'
     savefig(f'plots/{output}.png', fig=fig, tight=False)
@@ -548,7 +609,7 @@ def parse_args():
     args = parser.parse_args()
     if not args.debug:
         ic.disable()
-    if args.ref != 'ten':
+    if 'max' not in args.ref:
         args.ref = args.ref = float(args.ref)
     return args
 
