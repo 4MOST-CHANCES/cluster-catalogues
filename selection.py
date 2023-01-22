@@ -761,6 +761,15 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
             #print(tbl['name'][minsep2[:,]])
             # for i in np.arange(mcat['name'].size)[missing]:
             #     print(i, mcat['name'][i], closest2[i])
+        cluster_names = tra.size * ['']
+        for i in range(tra.size):
+            cluster_names[i] \
+                = [tbl[cname][i] for cname, _, _ in matching
+                   if tbl[cname][i] != '']
+            cluster_names[i] \
+                = cluster_names[i][0] if len(cluster_names[i]) > 0 \
+                    else tbl['name'][i]
+        tbl.add_column(cluster_names, name='Cluster Name', index=1)   
     legend_kwargs = dict(fontsize=12, loc='lower right')
     if args.sample == 'lowz':
         legend_kwargs['handler_map'] = {tuple: HandlerTuple(ndivide=None)}
