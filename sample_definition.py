@@ -3,7 +3,7 @@ This code works with the output of ``selection.py``
 """
 import argparse
 from astropy.io import ascii, fits
-from astropy.table import Table
+from astropy.table import Table, vstack
 from matplotlib import pyplot
 import numpy as np
 import os
@@ -17,6 +17,7 @@ def main():
         args.filename, args.sample, args.zbins)
     for subsample in ('complete', 'lowmass', 'cherrypick'):
         print(f'{subsample.capitalize()} sample:')
+        tbl = []
         for zbin in range(4):
             s = cluster_sample.zbin(subsample, zbin)
             #print(s)
@@ -24,13 +25,31 @@ def main():
             lv = ~s['LoVoCCS'].mask
             hf = ~s['HIFLUGCS'].mask
             ch = ~s['CHANCES'].mask
-            if np.sum(mk | lv | hf | ch) == 0:
+            mask = (mk | lv | hf | ch)
+            if args.sample == 'lowz':
+                wi = ~s['WINGS'].mask
+                sp = ~s['S-PLUS'].mask
+                mask = mask | wi | sp
+            if np.sum(mask) == 0:
                 continue
             print(f'*** zbin={zbin} ***')
-            if subsample == 'complete':
-                print(s)
+            if subsample == 'complete' or True:
+                ti = s
             else:
-                print(s[mk | lv | hf | ch])
+                ti = s[mask]
+            ti.sort('ra')
+            print(ti)
+            sm = (np.isin(ti['name'], ['93192518']).sum())
+            if sm  > 0:
+                print('Found it!')
+                return
+            ti.add_column(
+                (1+zbin)*np.ones(ti['ra'].size, dtype=int), index=0, name='zbin')
+            tbl.append(ti)
+            # write csv for easy visualization
+        tbl = vstack(tbl)
+        tbl.write(f'cluster-samples/{args.sample}_{subsample}.csv', format='ascii.csv',
+                  overwrite=True)
         print()
     return
 
@@ -42,9 +61,9 @@ class ClusterSample:
         self.sample = sample
         self.catalog = ascii.read(self.filename, format='fixed_width')
         if zbins == 'default':
-            zbins = [0.07, 0.15, 0.25, 0.35, 0.45] \
+            zbins = [0.07, 0.15, 0.25, 0.35, 0.452] \
                 if self.sample == 'evolution' \
-                else [0, 0.02, 0.04, 0.055, 0.07]
+                else [0, 0.01, 0.03, 0.05, 0.07]#[0, 0.02, 0.04, 0.055, 0.07]
         self.zbins = np.array(zbins)
 
     @property
