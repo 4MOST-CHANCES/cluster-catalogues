@@ -37,7 +37,7 @@ def main():
                 ti = s
             else:
                 ti = s[mask]
-            ti.sort('ra')
+            ti.sort('z')
             print(ti)
             sm = (np.isin(ti['name'], ['93192518']).sum())
             if sm  > 0:

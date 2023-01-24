@@ -178,7 +178,10 @@ def main():
             'wings', wings, label='WINGS', base_cols=('Cluster','ra','dec','z'),
             masscol='Lx_1e44')
 
-    splus = load_splus(chances)
+    if sample == 'lowz':
+        splus = load_splus(chances)
+    else:
+        splus = None
 
     act = Catalog('act-dr5')
     #act.catalog['coords'] = act.coords
@@ -210,7 +213,9 @@ def main():
         splus=splus, Nref=Nref)
     if sample == 'lowz':
         # we don't need to match codex here
-        kwargs['matching'][2] = ['WINGS', wings, 10*u.arcmin]
+        kwargs['matching'][2] = kwargs['matching'][1]
+        kwargs['matching'][1] = ['WINGS', wings, 10*u.arcmin]
+        kwargs['matching'].pop(3)
         # required for join
         xmass.catalog.remove_columns(['coords', 'lambda'])
         codex.catalog.remove_column('coords')
@@ -653,20 +658,23 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     #if cat.name == 'act-dr5':
     tra[tra > 180] -= 360
     coords = SkyCoord(ra=tbl['ra'], dec=tbl['dec'], unit='deg')
+    # for the plot
+    labels = []
+    lines = []
     # match SPLUS
     if splus:
         sep = coords.separation(splus['coords'][:,None])
         tbl['N_SPLUS'] = np.sum(sep < 5*tbl['d200'], axis=0)
         d200 = tbl['d200'].to(u.deg).value
         # this assumes 1 sq.deg. per SPLUS field
-        tbl['f_SPLUS'] = tbl['N_SPLUS'] / (np.pi*d200**2)
-        tbl['f_SPLUS'].format = '.1f'
+        tbl['f_SPLUS'] = tbl['N_SPLUS'] / (np.pi*(5*d200)**2)
+        tbl['f_SPLUS'].format = '.2f'
         minsep = np.min(sep, axis=0)
         closest = np.argmin(sep, axis=0)
         ic(coords.shape, sep.shape, minsep.shape)
         ic(minsep)
-        tbl['S-PLUS'] = [splus['NAME'][cl] if ms < 1*u.deg else ''
-                         for cl, ms in zip(closest, minsep)]
+        tbl['S-PLUS'] = [splus['NAME'][cl] if ms < size else ''
+                         for cl, ms, size in zip(closest, minsep, 5*d200*u.deg)]
         in_splus = (tbl['S-PLUS'] != '')
         print(f'{in_splus.sum()}/{N} clusters in S-PLUS')
         sample_masks = [
@@ -675,8 +683,6 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
             (in_splus & ~tbl['complete'] & ~tbl['lowmass'])]
         n0, n1, n2 = [m.sum() for m in sample_masks]
         kwargs = dict(marker='.', zorder=10)
-        labels = []
-        lines = []
         if args.sample == 'lowz':
             spluspts = []
             for i, (m, c, s) \
@@ -695,7 +701,7 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
     if matching is not None:
         matches = {}
         for (cname, mcat, maxsep), marker in zip(matching, 'osx^v<>8D'):
-            if cname.lower() == cat.name:
+            if cname.lower() == cat.label:
                 continue
             sep = coords.separation(mcat['coords'][:,None])
             pairs = (sep < maxsep)
@@ -743,10 +749,12 @@ def selfunc(args, cat, ref_level=0.9, Nref=100,
             ic(missing.size, missing.sum())
             mcat['dist'] = minsep2
             print(f'{missing.sum()} missing CHANCES clusters:')
-            miss = mcat['name','z','ra','dec','Lambda','S-PLUS',
-                        'Catalogue','CODEXID','dist'][missing]
-            print(miss)
-            miss.write('lowz_chances_missing.csv', format='csv', overwrite=True)
+            if args.sample == 'lowz':
+                miss = mcat['name','z','ra','dec','Lambda','S-PLUS',
+                            'Catalogue','CODEXID','dist'][missing]
+                print(miss)
+                miss.write('lowz_chances_missing.csv', format='csv',
+                           overwrite=True)
             a3301 = (tbl['name','ra','dec','z',])
             mra = mcat['ra'].copy()
             mra[mra > 180] -= 360
