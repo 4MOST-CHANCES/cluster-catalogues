@@ -19,6 +19,7 @@ from scipy.ndimage import gaussian_filter
 from scipy.optimize import minimize
 from scipy.special import erf
 from scipy.stats import ks_2samp
+import sys
 from time import time
 from tqdm import tqdm, trange
 import urllib3
@@ -33,14 +34,13 @@ def main():
     args = parse_args()
     chances = chances_catalog(args)
 
-    chances, others = load_ancillary(args, chances)
-    return
+    chances, others = load_ancillary(args, chances, 'chances')
     psz, act, spt, codex, mcxc = others
 
     # print('\n\n*** Missing from CHANCES ***\n')
     # missing = review_missing(args, chances, *others)
     # missing = load_decam(args, missing)
-    # missing, _ = load_ancillary(args, missing)
+    # missing, _ = load_ancillary(args, missing, 'missing')
 
     print('\n\n*** Fully mass-selected sample ***\n')
     most_massive_input \
@@ -50,19 +50,19 @@ def main():
     for catname in ('psz2', 'act-dr5', 'spt-sz', 'codex'):
         most_massive, _ = load_catalog(args, most_massive, catname)
     most_massive = load_decam(args, most_massive)
-    most_massive = load_ancillary(args, most_massive)[0]
+    most_massive = load_ancillary(args, most_massive, 'most_massive')[0]
     print(np.sort(most_massive.colnames))
 
     #print(np.sort(most_massive['Cluster Name']))
     most_massive_in_chances = np.isin(
-        most_massive['Cluster Name'], chances['Cluster Name'])
+        most_massive['name'], chances['name'])
     print(f'{most_massive_in_chances.sum()} of the' \
           f' {most_massive.size} most massive' \
           f' {most_massive_input.label} clusters in the range' \
           f' {args.zrng[0]} <= z <= {args.zrng[1]} are in CHANCES,')
-    print(f'out of a total of {chances["Cluster Name"].size} CHANCES' \
+    print(f'out of a total of {chances["name"].size} CHANCES' \
           f' {args.sample.capitalize()} clusters')
-    cols = ['Cluster Name','z','m500',most_massive.masscol,
+    cols = ['name','z','m500',most_massive.masscol,
             'PSZ2','ACT-DR5','N_spec','N_spec_z']
     print(most_massive[cols][most_massive_in_chances])
     #print(np.sort(most_massive.colnames))
@@ -73,7 +73,7 @@ def main():
     print(np.sort(most_massive_input.colnames))
     print(most_massive_input[np.isin(most_massive_input.obj,
                              most_massive[most_massive_input.label])])
-    print(most_massive['Cluster Name','z','CODEX-DECALS','m500','m500_CODEX'])
+    print(most_massive['name','z','CODEX-DECALS','m500','m500_CODEX'])
     plot_masses(args, chances, most_massive_input)
 
     return
@@ -101,7 +101,8 @@ def plot_masses(args, chances, cat):
     zx = (zbins[:-1]+zbins[1:]) / 2
     mx = (mbins[:-1]+mbins[1:]) / 2
     catmask = (cat.z > args.zrng[0]) & (cat.z < args.zrng[1]) \
-            & (cat.dec > -80) & (cat.dec < 5) & (np.abs(cat.b) > 20*u.deg)
+            & (cat.dec > -80*u.deg) & (cat.dec < 5*u.deg) \
+            & (np.abs(cat.b) > 20*u.deg)
     # use a mass definition that's consistent with the reference catalog
     catlabel = cat.label.split('-')[0]
     mass = chances[f'm500_{catlabel}']
@@ -110,8 +111,8 @@ def plot_masses(args, chances, cat):
     catmatch = np.isin(cat.obj, chances[cat.label])
     print(np.sort(chances[cat.label].value))
     if cat.label == 'PSZ2':
-        print(cat['NAME','REDSHIFT','RA','DEC','GLON','GLAT','MSZ'][~catmatch][-5:])
-    
+        print(cat['name','z','ra','dec','GLON','GLAT','MSZ'][~catmatch][-5:])
+
     fig, axes = plt.subplots(
         2, 3, figsize=(22, 15), constrained_layout=True)
     axes = np.reshape(axes, -1)
@@ -343,7 +344,7 @@ def selection_function(m, m0, sigma, a_m=0):
 ### External catalogs ###
 
 
-def load_ancillary(args, catalog):
+def load_ancillary(args, catalog, catalog_name):
     # these are the ones from which I might get a mass
     catalog, psz = load_catalog(args, catalog, 'psz2')
     catalog, act = load_catalog(args, catalog, 'act-dr5')
@@ -410,10 +411,8 @@ def load_ancillary(args, catalog):
     catalog[cols].write(f'catalogues/chances_clusters_{args.sample}.txt',
               format='ascii.fixed_width', overwrite=True)
     catalog[cols].write(f'catalogues/chances_clusters_{args.sample}.csv',
-              format='ascii.csv', overwrite=True)
-    
-    summarize_ancillary(args, catalog)
 
+    summarize_ancillary(args, catalog)
     others = (psz, act, spt, codex, mcxc)
     return catalog, others
 
@@ -421,23 +420,23 @@ def load_ancillary(args, catalog):
 def get_most_massive(args, cat, chances, n=200):
     gal = cat.coords.transform_to('galactic')
     mask = (cat.z > args.zrng[0]) & (cat.z < args.zrng[1]) \
-        & (cat.dec > -80) & (cat.dec < 5) & (np.abs(gal.b) > 20*u.deg)
+        & (cat.dec > -80*u.deg) & (cat.dec < 5*u.deg) \
+        & (np.abs(gal.b) > 20*u.deg)
     print(np.sort(cat.colnames))
-    ic(cat.mass, cat.name)
     jsort = np.argsort(cat.mass[mask])[-n:]
     most_massive = Table(
-        {'Cluster Name': cat.obj[mask][jsort],
-         'RA_J2000': cat.ra[mask][jsort],
-         'Dec_J2000': cat.dec[mask][jsort],
+        {'name': cat.obj[mask][jsort],
+         'ra': cat.ra[mask][jsort],
+         'dec': cat.dec[mask][jsort],
          'z': cat.z[mask][jsort],
          cat.masscol: cat.mass[mask][jsort]})
     most_massive[cat.masscol].format = '.2f'
-    most_massive.sort('Cluster Name')
+    most_massive.sort('name')
     most_massive = Catalog(
         'Most Massive', most_massive,
-        base_cols=('Cluster Name','RA_J2000','Dec_J2000','z'),
+        base_cols=('name','ra','dec','z'),
         masscol=cat.masscol)
-    for col in ('RA_J2000', 'Dec_J2000', 'z'):
+    for col in ('ra', 'dec', 'z'):
         most_massive.catalog[col].format = '%.3f'
     # compliance...
     most_massive.catalog['coords'] = most_massive.coords
@@ -446,8 +445,8 @@ def get_most_massive(args, cat, chances, n=200):
         chances['coords'][:,None])
     closest = np.argmin(dist_chances, axis=0)
     matches = np.min(dist_chances, axis=0) < 5*u.arcmin
-    most_massive.catalog['Cluster Name'][matches] \
-        = chances['Cluster Name'][closest[matches]]
+    most_massive.catalog['name'][matches] \
+        = chances['name'][closest[matches]]
     tbl = most_massive.catalog
     # additional attributes so that we can also use it
     # as a Catalog-like object
@@ -478,17 +477,17 @@ def review_missing(args, chances, psz, act, spt, codex, mcxc):
     # merge the three samples -- giving them the same names as CHANCES
     # so I can use them easily
     szmassive = Table(
-        {'Cluster Name': np.hstack(
+        {'name': np.hstack(
             [psz['NAME'][psz_z][massive['psz2']],
              act['name'][act_z][massive['act-dr5']],
              spt['SPT'][spt_z][massive['spt-sz']],
              mcxc['MCXC'][mcxc_z][massive['mcxc']]]),
-         'RA_J2000': np.hstack(
+         'ra': np.hstack(
             [psz['RA'][psz_z][massive['psz2']],
              act['RADeg'][act_z][massive['act-dr5']],
              spt['RAdeg'][spt_z][massive['spt-sz']],
              mcxc['RAdeg'][mcxc_z][massive['mcxc']]]),
-         'Dec_J2000': np.hstack(
+         'dec': np.hstack(
             [psz['DEC'][psz_z][massive['psz2']],
              act['decDeg'][act_z][massive['act-dr5']],
              spt['DEdeg'][spt_z][massive['spt-sz']],
@@ -500,11 +499,11 @@ def review_missing(args, chances, psz, act, spt, codex, mcxc):
              mcxc['z'][mcxc_z][massive['mcxc']]])
         })
     # Catalog object
-    szmassive.sort('Cluster Name')
+    szmassive.sort('name')
     szmassive = Catalog(
         'Missing Massive', szmassive,
-        base_cols=('Cluster Name','RA_J2000','Dec_J2000','z'))
-    for col in ('RA_J2000', 'Dec_J2000', 'z'):
+        base_cols=('name','ra','dec','z'))
+    for col in ('ra', 'dec', 'z'):
         szmassive.catalog[col].format = '%.3f'
     # also for consistency with CHANCES
     szmassive.catalog['coords'] = szmassive.coords
@@ -537,18 +536,18 @@ def review_missing(args, chances, psz, act, spt, codex, mcxc):
             unique.append(cl['SPT-SZ'])
         elif cl['MCXC'] != '':
             unique.append(f"MCXC {cl['MCXC']}")
-    szmassive.catalog['Cluster Name'] = unique
+    szmassive.catalog['name'] = unique
     unique, unique_idx = np.unique(unique, return_index=True)
     szmassive.catalog = szmassive.catalog[unique_idx]
     print(f'There are {unique.size} unique "massive" clusters')
     # which are not in CHANCES?
     massive_in_chances = np.isin(
-        szmassive['Cluster Name'],
+        szmassive['name'],
         np.reshape(
             [chances[col] for col in ['PSZ2','ACT-DR5','SPT-SZ','MCXC']], -1))
     ic(massive_in_chances, massive_in_chances.shape)
     missing = ~massive_in_chances
-    ic(szmassive[missing]['Cluster Name','z','PSZ2','ACT-DR5','MCXC'])
+    ic(szmassive[missing]['name','z','PSZ2','ACT-DR5','MCXC'])
     return szmassive[missing]
 
 
@@ -573,15 +572,18 @@ def chances_catalog(args):
             ['Cluster', 'RA', 'Dec'], ['Cluster Name', 'RA_J2000', 'Dec_J2000'])
     else:
         cat.rename_column('Z', 'z')
-    cat['coords'] = SkyCoord(ra=cat['RA_J2000'], dec=cat['Dec_J2000'], unit='deg')
-    cat.sort('RA_J2000')
+    cat.rename_columns(
+        ['Cluster Name', 'RA_J2000', 'Dec_J2000', 'Z'], ['name', 'ra', 'dec', 'z'])
+    cat['coords'] = SkyCoord(
+        ra=cat['ra'], dec=cat['dec'], unit='deg')
+    cat.sort('ra')
     return cat
 
 
 def calculate_m200(chances, cosmo=Planck18):
     m200, c200, r200, d200 = np.zeros((4,chances['m500'].size))
     miss = (chances['m500'] == 0)
-    ic(chances['m500'][~miss])
+    ic(chances['m500','z'][~miss])
     m200[~miss], c200[~miss], r200[~miss], d200[~miss] \
         = calculate_m200_from_m500(
             1e14*chances['m500'][~miss], chances['z'][~miss], cosmo=cosmo)
@@ -617,7 +619,7 @@ def calculate_m200_from_m500(m500, z, cosmo=Planck18, model='ishiyama21'):
 def match_galaxy_catalog(args, chances, galcat, radius=5, unit='r200',
                          dz=0.03):
     """Match cluster catalog to external galaxy catalog
-    
+
     ``unit`` must be either 'arcmin' or 'r200'"""
     print(f'Matching galaxy catalog {galcat.name}')
     assert unit in ('arcmin', 'r200')
@@ -633,11 +635,16 @@ def match_galaxy_catalog(args, chances, galcat, radius=5, unit='r200',
     Ngal, Ngal_z = np.zeros((2,maxdist.size), dtype=int)
     path = os.path.join('aux', 'spectroscopic', args.sample.split('-')[0])
     os.makedirs(path, exist_ok=True)
+    # this should never happen
+    if 'Cluster Name' in chances.colnames:
+        namecol, racol, deccol = ['Cluster Name', 'RA_J2000', 'Dec_J2000']
+    else:
+        namecol, racol, deccol = ['name', 'ra', 'dec']
     for i, (cl, dmax) in tqdm(enumerate(zip(chances, maxdist))):
-        ic(i, cl['Cluster Name','RA_J2000','Dec_J2000','z','m200','d200'])
-        cosdec = np.cos(np.radians(cl['Dec_J2000']))
-        nearby = (np.abs(cl['RA_J2000']-galcat.ra)*u.deg < 2*dmax/cosdec) \
-            & (np.abs(cl['Dec_J2000']-galcat.dec)*u.deg < 2*dmax)
+        #ic(i, cl['Cluster Name','RA_J2000','Dec_J2000','z','m200','d200'])
+        cosdec = np.cos(np.radians(cl[deccol]))
+        nearby = (np.abs(cl[racol]*u.deg-galcat.ra) < 2*dmax/cosdec) \
+            & (np.abs(cl[deccol]*u.deg-galcat.dec) < 2*dmax)
         if nearby.sum() == 0:
             continue
         sep = cl['coords'].separation(galcat.coords[nearby])
@@ -785,13 +792,14 @@ def query_cluster(args, cosmo, eso, i, cluster):
 
 def add_masses(args, chances, cat, masscol, factor):
     suff = cat.label.split('-')[0]
-    chances[f'm500_{suff}'] = -np.ones(chances['Cluster Name'].size)
+    col = 'name' if 'name' in chances.colnames else 'Cluster Name'
+    chances[f'm500_{suff}'] = -np.ones(chances[col].size)
     mask = chances[f'{cat.label}_idx'] > -99
     chances[f'm500_{suff}'][mask] \
         = cat[masscol][chances[f'{cat.label}_idx'][mask]]
     chances[f'm500_{suff}'].format = '%.2f'
     if factor is not None:
-        chances[f'm500_{suff}_corr'] = -np.ones(chances['Cluster Name'].size)
+        chances[f'm500_{suff}_corr'] = -np.ones(chances[col].size)
         chances[f'm500_{suff}_corr'][mask] \
             = factor * chances[f'm500_{suff}'][mask]
         chances[f'm500_{suff}_corr'].format = '%.2f'
@@ -802,8 +810,8 @@ def load_catalog(args, chances, name):
     """This is for the ones I have in ``astro``"""
     cat = Catalog(name)
     goodz = (cat.z >= args.zrng[0]) & (cat.z < args.zrng[1])
-    gooddec = (cat.dec >= -80) & (cat.dec <= 5)
-    cat = Catalog(name, catalog=cat[goodz & gooddec])
+    gooddec = (cat.dec >= -80*u.deg) & (cat.dec <= 5*u.deg)
+    cat = Catalog(name, catalog=cat[goodz & gooddec], base_cols=('name','ra','dec','z'))
     chances, cat = match_catalog(chances, cat)
     return chances, cat
 
@@ -927,7 +935,7 @@ def load_ned(args, cat, path='aux/ned/spec'):
     os.makedirs(path, exist_ok=True)
     http = urllib3.PoolManager()
     for i, cl in enumerate(cat):
-        name = cl['Cluster Name'].replace(" ", "_")
+        name = cl['name'].replace(" ", "_")
         output = os.path.join(path, f'{name}_ned.txt')
         if os.path.isfile(output):
             continue
@@ -944,7 +952,7 @@ def load_ned(args, cat, path='aux/ned/spec'):
             '&in_objtypes2=Infrared&in_objtypes2=Xray&nmp_op=ANY' \
             '&out_csys=Equatorial&out_equinox=J2000.0&obj_sort=RA+or+Longitude' \
             '&of=ascii_tab&zv_breaker=30000.0&list_limit=5&img_stamp=YES'.format(
-                cl['RA_J2000'], cl['Dec_J2000'], 60*cl['d200']))
+                cl['ra'], cl['dec'], 60*cl['d200']))
         ic(url)
         ic(url.data)
         ic(time()-ti)
@@ -1000,7 +1008,7 @@ def summarize_ancillary(args, chances):
     ic(np.sort(chances.colnames))
     for col in ('m500', 'm200', 'd200'):
         chances[col].format = '%.2f'
-    cols = ['Cluster Name', 'z', 'm500', '5d200',
+    cols = ['name', 'z', 'm500', '5d200',
             'CODEX-DECALS', 'PSZ2', 'ACT-DR5', 'SPT-SZ', 'MeerKAT', 'DECam', 'S-PLUS',
             'N_spec', 'N_spec_z', 'N_tgss', 'N_first']
     if args.sample == 'lowz':
@@ -1131,4 +1139,5 @@ def parse_args():
     return args
 
 
-main()
+if __name__ == '__main__':
+    main()
