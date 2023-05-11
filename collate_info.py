@@ -34,6 +34,7 @@ def main():
     chances = chances_catalog(args)
 
     chances, others = load_ancillary(args, chances)
+    return
     psz, act, spt, codex, mcxc = others
 
     # print('\n\n*** Missing from CHANCES ***\n')
@@ -372,17 +373,23 @@ def load_ancillary(args, catalog):
     ic(catalog)
 
     # add masses
-    catalog = add_masses(catalog, psz, 'MSZ', 10**0.13)
-    catalog = add_masses(catalog, act, 'M500cCal', None)
-    catalog = add_masses(catalog, spt, 'M500c', None)
-    catalog = add_masses(catalog, mcxc, 'M500', 10**0.18)
-    catalog = add_masses(catalog, codex, 'M500', None)
-    #catalog = add_masses(catalog, codex, 'LX0124', None)
-    catalog['m500'] = catalog['m500_ACT']
+    catalog = add_masses(args, catalog, psz, 'MSZ', 10**0.13)
+    catalog = add_masses(args, catalog, act, 'M500cCal', None)
+    catalog = add_masses(args, catalog, spt, 'M500c', None)
+    catalog = add_masses(args, catalog, mcxc, 'M500', 10**0.18)
+    catalog = add_masses(args, catalog, codex, 'M500', None)
+    #catalog = add_masses(args, catalog, codex, 'LX0124', None)
+    if 'lowz' in args.sample:
+        catalog['m500'] = catalog['m500_CODEX']
+    else:
+        catalog['m500'] = catalog['m500_ACT']
     catalog['m500'][catalog['m500'] == -1] \
         = catalog['m500_SPT'][catalog['m500'] == -1]
     catalog['m500'][catalog['m500'] == -1] \
         = catalog['m500_PSZ2_corr'][catalog['m500'] == -1]
+    if 'evolution' in args.sample:
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_CODEX'][catalog['m500'] == -1]
     catalog['m500'][catalog['m500'] == -1] \
         = catalog['m500_MCXC_corr'][catalog['m500'] == -1]
     catalog = calculate_m200(catalog)
@@ -399,9 +406,10 @@ def load_ancillary(args, catalog):
     # the extent we want, in degrees
     catalog['5d200'] = (5/60) * catalog['d200']
 
-    catalog.write(f'catalogues/chances_clusters_{args.sample}.txt',
+    cols = [col for col in catalog.colnames if col != 'coords']
+    catalog[cols].write(f'catalogues/chances_clusters_{args.sample}.txt',
               format='ascii.fixed_width', overwrite=True)
-    catalog.write(f'catalogues/chances_clusters_{args.sample}.csv',
+    catalog[cols].write(f'catalogues/chances_clusters_{args.sample}.csv',
               format='ascii.csv', overwrite=True)
     
     summarize_ancillary(args, catalog)
@@ -547,8 +555,12 @@ def review_missing(args, chances, psz, act, spt, codex, mcxc):
 def chances_catalog(args):
     if args.sample == 'lowz':
         file = 'CHANCES low-z clusters.csv'
-    else:
+    elif args.sample == 'evolution':
         file = 'CHANCES Evolution clusters.csv'
+    elif args.sample == 'lowz-final':
+        file = 'final-catalogues/S1501_clusters_final.csv'
+    elif args.sample == 'evolution-final':
+        file = 'final-catalogues/S1502_50clusters.csv'
     cat = ascii.read(file, format='csv')
     # happens in low-z
     if 'col12' in cat.colnames:
@@ -556,9 +568,12 @@ def chances_catalog(args):
         cat.remove_column('col12')
     # cat = Catalog('CHANCES', catalog=cat,
     #               base_cols=('Cluster Name','RA_J2000','Dec_J2000','Z'))
-    cat.rename_column('Z', 'z')
-    cat['coords'] = SkyCoord(
-        ra=cat['RA_J2000'], dec=cat['Dec_J2000'], unit='deg')
+    if 'final' in args.sample:
+        cat.rename_columns(
+            ['Cluster', 'RA', 'Dec'], ['Cluster Name', 'RA_J2000', 'Dec_J2000'])
+    else:
+        cat.rename_column('Z', 'z')
+    cat['coords'] = SkyCoord(ra=cat['RA_J2000'], dec=cat['Dec_J2000'], unit='deg')
     cat.sort('RA_J2000')
     return cat
 
@@ -616,6 +631,8 @@ def match_galaxy_catalog(args, chances, galcat, radius=5, unit='r200',
     #         chances['m200'][missing] /= 1e14
     maxdist = (radius * chances['d200'] if unit == 'r200' else radius) * u.arcmin
     Ngal, Ngal_z = np.zeros((2,maxdist.size), dtype=int)
+    path = os.path.join('aux', 'spectroscopic', args.sample.split('-')[0])
+    os.makedirs(path, exist_ok=True)
     for i, (cl, dmax) in tqdm(enumerate(zip(chances, maxdist))):
         ic(i, cl['Cluster Name','RA_J2000','Dec_J2000','z','m200','d200'])
         cosdec = np.cos(np.radians(cl['Dec_J2000']))
@@ -631,7 +648,7 @@ def match_galaxy_catalog(args, chances, galcat, radius=5, unit='r200',
             continue
         clname = cl['Cluster Name'].replace(' ', '_')
         galcat.catalog[nearby][galcat.base_cols][matches].write(
-            f'aux/spectroscopic/{args.sample}/{clname}.txt',
+            os.path.join(path, f'{clname}.txt'),
             format='ascii.fixed_width', overwrite=True)
         if dz is None:
             ic(Ngal[i])
@@ -766,7 +783,7 @@ def query_cluster(args, cosmo, eso, i, cluster):
 #### Ancillary data ####
 
 
-def add_masses(chances, cat, masscol, factor):
+def add_masses(args, chances, cat, masscol, factor):
     suff = cat.label.split('-')[0]
     chances[f'm500_{suff}'] = -np.ones(chances['Cluster Name'].size)
     mask = chances[f'{cat.label}_idx'] > -99
@@ -774,7 +791,7 @@ def add_masses(chances, cat, masscol, factor):
         = cat[masscol][chances[f'{cat.label}_idx'][mask]]
     chances[f'm500_{suff}'].format = '%.2f'
     if factor is not None:
-        chances[f'm500_{suff}_corr'] = -np.ones(chances['RA_J2000'].size)
+        chances[f'm500_{suff}_corr'] = -np.ones(chances['Cluster Name'].size)
         chances[f'm500_{suff}_corr'][mask] \
             = factor * chances[f'm500_{suff}'][mask]
         chances[f'm500_{suff}_corr'].format = '%.2f'
@@ -1100,7 +1117,9 @@ def summarize_ancillary(args, chances):
 def parse_args():
     parser = argparse.ArgumentParser()
     add = parser.add_argument
-    add('sample', choices=('evolution', 'lowz'), default='lowz')
+    add('sample',
+        choices=('evolution', 'lowz', 'evolution-final', 'lowz-final'),
+        default='lowz')
     add('--debug', action='store_true')
     add('-m', '--mass-selection', default='psz2')
     add('--ncores', default=1, type=int)
@@ -1108,7 +1127,7 @@ def parse_args():
     args = parser.parse_args()
     if not args.debug:
         ic.disable()
-    args.zrng = (0, 0.07) if args.sample == 'lowz' else (0.07, 0.45)
+    args.zrng = (0, 0.07) if 'lowz' in args.sample else (0.07, 0.45)
     return args
 
 
