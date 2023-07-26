@@ -11,6 +11,7 @@ from colossus.halo import concentration
 from datetime import date
 from icecream import ic
 from matplotlib import pyplot as plt, ticker
+from matplotlib.colors import LogNorm, Normalize
 from multiprocessing.pool import ThreadPool, Pool
 import numpy as np
 import os
@@ -22,7 +23,7 @@ from time import time
 from tqdm import tqdm
 import urllib3
 
-from astro.clusters import Catalog
+from astro.clusters import ClusterCatalog
 from plottery.plotutils import savefig, update_rcParams
 update_rcParams()
 
@@ -344,6 +345,7 @@ def selection_function(m, m0, sigma, a_m=0):
 
 
 def load_ancillary(args, catalog, catalog_name):
+    use_codex3 = True
     # these are the ones from which I might get a mass
     catalog, psz = load_catalog(args, catalog, 'psz2')
     catalog, act = load_catalog(args, catalog, 'act-dr5')
@@ -361,7 +363,8 @@ def load_ancillary(args, catalog, catalog_name):
                for obj in catalog[szcat.label]]
     #if 'SPLUS' not in catalog.colnames:
     catalog = load_splus(args, catalog)
-    catalog, codex = load_codex3(args, catalog)
+    catalog, codex = load_codex(args, catalog)
+    catalog, codex3 = load_codex3(args, catalog)
     ic(codex)
     # other catalogs
     catalog, mk = load_meerkat(args, catalog)
@@ -380,13 +383,20 @@ def load_ancillary(args, catalog, catalog_name):
     catalog = add_masses(catalog, spt, 'M500c', None)
     catalog = add_masses(catalog, mcxc, 'M500', 10**0.18)
     catalog = add_masses(catalog, codex, 'M500', None)
-    #catalog = add_masses(catalog, codex, 'LX0124', None)
+    # this one found comparing to codex
+    catalog = add_masses(catalog, codex3, 'M500', 1.06)
+
+    plot_codex_mass_ratio(catalog)
+
+    ic(np.sort(catalog.colnames))
     if args.sample == 'lowz':
-        catalog['m500'] = catalog['m500_CODEX3']
+        catalog['m500'] = catalog['m500_CODEX']
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_CODEX3'][catalog['m500'] == -1]
         catalog['m500'][catalog['m500'] == -1] \
             = catalog['m500_PSZ2_corr'][catalog['m500'] == -1]
         catalog['m500'][catalog['m500'] == -1] \
-            = catalog['m500_MCXC'][catalog['m500'] == -1]
+            = catalog['m500_MCXC_corr'][catalog['m500'] == -1]
     else:
         catalog['m500'] = catalog['m500_ACT']
         catalog['m500'][catalog['m500'] == -1] \
@@ -394,7 +404,9 @@ def load_ancillary(args, catalog, catalog_name):
         catalog['m500'][catalog['m500'] == -1] \
             = catalog['m500_PSZ2_corr'][catalog['m500'] == -1]
         catalog['m500'][catalog['m500'] == -1] \
-            = catalog['m500_CODEX3'][catalog['m500'] == -1]
+            = catalog['m500_CODEX'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = 1.06 * catalog['m500_CODEX3'][catalog['m500'] == -1]
         catalog['m500'][catalog['m500'] == -1] \
             = catalog['m500_MCXC_corr'][catalog['m500'] == -1]
     catalog = calculate_m200(catalog)
@@ -420,6 +432,7 @@ def load_ancillary(args, catalog, catalog_name):
               format='ascii.csv', overwrite=True)
     
     summarize_ancillary(args, catalog)
+    summarize_masses(args, catalog)
 
     others = (psz, act, spt, codex, mcxc)
     return catalog, others
@@ -440,7 +453,7 @@ def get_most_massive(args, cat, chances, n=200):
          cat.masscol: cat.mass[mask][jsort]})
     most_massive[cat.masscol].format = '.2f'
     most_massive.sort('name')
-    most_massive = Catalog(
+    most_massive = ClusterCatalog(
         'Most Massive', most_massive,
         base_cols=('name','ra','dec','z'),
         masscol=cat.masscol)
@@ -466,6 +479,89 @@ def get_most_massive(args, cat, chances, n=200):
     tbl.mass = most_massive.mass
     tbl.size = most_massive.size
     return tbl
+
+
+def plot_codex_mass_ratio(catalog, s=50):
+    def annotate_cluster(row, x, z, ratio, j, log=True):
+        name = catalog['name'][j]
+        ic(name, z[j], ratio[j]-1)
+        dx = 0.1*x[j] if log else 0.05
+        row[1].text(
+            x[j]+dx, ratio[j]-1, name,
+            ha='left', va='center', fontsize=14)
+        row[2].text(
+            z[j]+0.002, ratio[j]-1, name,
+            ha='left', va='center', fontsize=14)
+        return
+    def plot_row(row, x, y, z, xlabel, ylabel, log=True):
+        im_m = row[0].scatter(x, y, c=z, s=s)
+        row[0].set(xlabel=xlabel, ylabel=ylabel)
+        valid = (x > 0) & (y > 0)
+        ratio = y / x
+        r0 = np.median(ratio[valid])
+        e = np.abs(np.percentile(ratio[valid], [16, 84]) - r0) \
+            / (valid.size - 1)**0.5
+        label = rf'$\langle x\rangle = {r0:.3f}_{{{-e[0]:.3f}}}^{{+{e[1]:.3f}}}$'
+        row[1].scatter(x[valid], ratio[valid]-1, c=z[valid], s=s)
+        row[1].axhline(0, ls='--', color='k', lw=2)
+        row[1].set(xlabel=xlabel, ylabel=f'{ylabel} / {xlabel}')
+        if log:
+            row[0].set(xscale='log', yscale='log')
+            row[1].set(xscale='log')
+        norm = LogNorm(vmin=1e14, vmax=3e15) if log else Normalize()
+        im_z = row[2].scatter(
+            z[valid], ratio[valid]-1, c=x[valid], s=s, norm=norm)
+        row[2].axhline(0, ls='--', color='k', lw=2)
+        row[2].set(xlabel='Redshift')
+        mbar = plt.colorbar(
+            im_z, ax=row[2], label=xlabel,
+            orientation='vertical', aspect=10)
+        # so that they are neither the maxima nor minima, for annotation
+        ratio[np.isnan(ratio) | (ratio < 0)] = 1
+        for j in np.argsort(ratio)[:3]:
+            annotate_cluster(row, x, z, ratio, j, log=log)
+        for j in np.argsort(ratio)[-3:]:
+            annotate_cluster(row, x, z, ratio, j, log=log)
+        return im_m, im_z
+
+    ic(np.sort(catalog.colnames))
+    ic(catalog[['name','z','m500_CODEX','m500_CODEX3']])
+    codex_mass_ratio = catalog['m500_CODEX3'] / catalog['m500_CODEX']
+    fig, axes = plt.subplots(
+        3, 3, figsize=(16,14), constrained_layout=True)
+    # m500
+    m500_codex = 1e14 * catalog['m500_CODEX']
+    m500_codex3 = 1e14 * catalog['m500_CODEX3']
+    im_m, im_z = plot_row(
+        axes[0], m500_codex, m500_codex3, catalog['z'],
+        '$M_{500}^\mathrm{CODEX}$', '$M_{500}^\mathrm{CODEX3}$')
+    # m200
+    m200_codex, c200_codex, r200_codex, d200_codex \
+        = calculate_m200_from_m500(m500_codex, catalog['z'])
+    m200_codex3, c200_codex3, r200_codex3, d200_codex3 \
+        = calculate_m200_from_m500(m500_codex3, catalog['z'])
+    im_m, im_z = plot_row(
+        axes[1], m200_codex, m200_codex3, catalog['z'],
+        '$M_{200}^\mathrm{CODEX}$', '$M_{200}^\mathrm{CODEX3}$')
+    # r200
+    im_m, im_z = plot_row(
+        axes[2], r200_codex, r200_codex3, catalog['z'],
+        '$d_{200}^\mathrm{CODEX}$', '$d_{200}^\mathrm{CODEX3}$', log=False)
+    # references
+    m = 1e14 * np.linspace(1, 30, 22)
+    for row in axes[:2]:
+        row[0].plot(m, m, 'k--', lw=2)
+    r = np.linspace(0.5, 2, 10)
+    axes[2,0].plot(r, r, 'k--', lw=2)
+    # colorbars
+    zbar = plt.colorbar(
+        im_m, ax=axes[-1,:2], label='Redshift', orientation='horizontal',
+        aspect=18)
+    zbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
+    output = 'plots/codex_mass_ratio.png'
+    savefig(output, fig=fig, tight=False)
+    sys.exit()
+    return
 
 
 def review_missing(args, chances, psz, act, spt, codex, mcxc):
@@ -508,7 +604,7 @@ def review_missing(args, chances, psz, act, spt, codex, mcxc):
         })
     # Catalog object
     szmassive.sort('name')
-    szmassive = Catalog(
+    szmassive = ClusterCatalog(
         'Missing Massive', szmassive,
         base_cols=('name','ra','dec','z'))
     for col in ('ra', 'dec', 'z'):
@@ -616,6 +712,7 @@ def calculate_m200(chances, cosmo=Planck18):
         overdensity=200, frame='physical', cosmo=cosmo)
     # these have a mass in Ciria's file but not in the catalogues we
     # review here
+    ic(chances['m200_listed'][with_listed_m200] / m200[with_listed_m200])
     m200[with_listed_m200] = 1e14 * chances['m200_listed'][with_listed_m200]
     r200[with_listed_m200], d200[with_listed_m200] \
         = radius_from_m200(nfw_with_listed_m200, cosmo=cosmo)
@@ -855,10 +952,10 @@ def add_masses_manual(chances):
 def load_catalog(args, chances, name):
     """This is for the ones I have in ``astro``"""
     ic(name)
-    cat = Catalog(name)
+    cat = ClusterCatalog(name)
     goodz = (cat.z >= args.zrng[0]) & (cat.z < args.zrng[1])
     gooddec = (cat.dec >= -80*u.deg) & (cat.dec <= 5*u.deg)
-    cat = Catalog(name, catalog=cat[goodz & gooddec], base_cols=('name','ra','dec','z'))
+    cat = ClusterCatalog(name, catalog=cat[goodz & gooddec], base_cols=('name','ra','dec','z'))
     # Simet et al. relation
     if name == 'redmapper':
         cat.catalog['M200m'] = 10**14.34 * (cat['LAMBDA']/40)**1.33
@@ -884,7 +981,7 @@ def load_decam(args, catalog):
 
 def load_gal_first(args, chances):
     filename = 'aux/radio/first_14dec17.fits.gz'
-    first = Catalog(
+    first = ClusterCatalog(
         'FIRST', fits.getdata(filename), base_cols=('INDEX', 'RA', 'DEC', 'FINT'))
     chances, first = match_galaxy_catalog(args, chances, first, dz=None)
     return chances, first
@@ -892,7 +989,7 @@ def load_gal_first(args, chances):
 
 def load_gal_spec(args, chances, base_cols=('index','RA','DEC','z')):
     filename = 'aux/spectroscopic/SpecZ_Catalogue_20221105.csv'
-    spec = Catalog(
+    spec = ClusterCatalog(
         'spec', ascii.read(filename, format='csv'), base_cols=base_cols)
     chances, spec = match_galaxy_catalog(args, chances, spec)
     return chances, spec
@@ -900,7 +997,7 @@ def load_gal_spec(args, chances, base_cols=('index','RA','DEC','z')):
 
 def load_gal_tgss(args, chances):
     filename = 'aux/radio/TGSSADR1_7sigma_catalog.fits'
-    tgss = Catalog('TGSS', fits.getdata(filename),
+    tgss = ClusterCatalog('TGSS', fits.getdata(filename),
                    base_cols=('Source_name','RA','DEC','Total_flux'))
     chances, tgss = match_galaxy_catalog(args, chances, tgss, dz=None)
     return chances, tgss
@@ -911,7 +1008,7 @@ def load_gal_tgss(args, chances):
 
 def load_clashvlt(args, chances):
     filename = 'aux/spectroscopic/clashvlt_sample.txt'
-    clashvlt = Catalog(
+    clashvlt = ClusterCatalog(
         'CLASH-VLT', ascii.read(filename, format='fixed_width'),
         base_cols=('Cluster', 'RA', 'DEC', 'z'),
         coord_unit=(u.hourangle, u.deg))
@@ -929,9 +1026,9 @@ def load_codex(args, chances):
     codex['id_cluster'] = np.array(codex['id_cluster'], dtype=str)
     codex['M500'] /= 1e14
     codex['M200c'] /= 1e14
-    codex = Catalog(
+    codex = ClusterCatalog(
         'codex', codex, cols=cols, base_cols=cols[:4],
-        label='CODEX-DECALS', masscol='M500')
+        label='CODEX', masscol='M500')
     chances, codex = match_catalog(chances, codex)
     return chances, codex
 
@@ -943,7 +1040,7 @@ def load_codex3(args, chances):
     codex['M500'] = codex['M200c'] * codex['M500/M200']
     cols = ['CODEX3', 'RA_X', 'Dec_X', 'z_best', 'lambda',
             'Lx0124', 'M500', 'M200c']
-    codex = Catalog(
+    codex = ClusterCatalog(
         'codex', codex, cols=cols, base_cols=cols[:4],
         label='CODEX3-LSDR10', masscol='M500')
     chances, codex = match_catalog(chances, codex)
@@ -952,7 +1049,7 @@ def load_codex3(args, chances):
 def load_hiflugcs(args, chances):
     filename = 'aux/xray/hiflugcs_sample.txt'
     hiflugcs = ascii.read(filename, format='cds')
-    hiflugcs = Catalog(
+    hiflugcs = ClusterCatalog(
         'HIFLUGCS', hiflugcs[hiflugcs['Sample'] == 'Included'],
         base_cols=('CName', 'RAdeg', 'DEdeg', 'z'))
     chances, hiflugcs = match_catalog(chances, hiflugcs)
@@ -961,7 +1058,7 @@ def load_hiflugcs(args, chances):
 
 def load_lovoccs(args, chances):
     filename = 'aux/spectroscopic/lovoccs_sample.txt'
-    lovoccs = Catalog(
+    lovoccs = ClusterCatalog(
         'LoVoCCS', ascii.read(filename, format='basic'),
         base_cols=('Name','ra','dec','z'))
     chances, lovoccs = match_catalog(chances, lovoccs)
@@ -970,7 +1067,7 @@ def load_lovoccs(args, chances):
 
 def load_meneacs(args, chances):
     filename = 'aux/optical/meneacs_cccp.txt'
-    meneacs = Catalog('MENeaCS', ascii.read(filename, format='basic'),
+    meneacs = ClusterCatalog('MENeaCS', ascii.read(filename, format='basic'),
                       base_cols=('Cluster','RA','Dec','z'),
                       coord_unit=(u.hourangle, u.deg))
     chances, meneacs = match_catalog(chances, meneacs)
@@ -978,7 +1075,7 @@ def load_meneacs(args, chances):
 
 
 def load_meerkat(args, chances):
-    mk = Catalog(
+    mk = ClusterCatalog(
         'MeerKAT', ascii.read('aux/meerkat/meerkat_legacy.csv', format='csv'))
     #ic(mk)
     chances, mk = match_catalog(chances, mk, name='MeerKAT')
@@ -987,7 +1084,7 @@ def load_meerkat(args, chances):
 
 def load_meerkat_diffuse(args, chances):
     mkd = fits.open('aux/meerkat/Table4_MGCLS_diffuse.fits')[1].data
-    mkd = Catalog(
+    mkd = ClusterCatalog(
         'MKDiffuse', mkd,
         base_cols=('ClusterName','R.A.J2000 (deg)','Dec.J2000 (deg)','z'))
     chances, mkd = match_catalog(chances, mkd, name='MKDiffuse')
@@ -1056,7 +1153,7 @@ def load_splus(args, cat):
 
 def load_xmm(args, chances):
     filename = 'aux/xray/local_fof_insideSplus_xmm.cat'
-    xmm = Catalog(
+    xmm = ClusterCatalog(
         'XMM', ascii.read(filename, format='commented_header'),
         base_cols=('OBSERVATION.TARGET','RA_X','DEC_X','z'))
     chances, xmm = match_catalog(chances, xmm)
@@ -1071,10 +1168,12 @@ def summarize_ancillary(args, chances):
     ic(np.sort(chances.colnames))
     for col in ('m500', 'm200', 'd200'):
         chances[col].format = '%.2f'
-    cols = ['name', 'z', 'm500', '5d200(deg)',
+    cols = ['name', 'z', 'm500', '5d200(deg)', 'CODEX',
             'CODEX3-LSDR10', 'PSZ2', 'ACT-DR5', 'SPT-SZ',
             'MeerKAT', 'DECam', 'S-PLUS',
             'N_spec', 'N_spec_z', 'N_tgss', 'N_first']
+    if 'CODEX3-LSDR10' not in chances.colnames:
+        cols.pop('CODEX3-LSDR10')
     if args.sample == 'lowz':
         cols = cols[:4] + ['XMM'] + cols[4:]
         if 'AAOzs' in chances.colnames:
@@ -1148,8 +1247,11 @@ def summarize_ancillary(args, chances):
     print(tbl[hiflugcs])
     print(f'  {xmm.sum()} with XMM')
     print(f'  {mcxc.sum()} in MCXC')
-    #codex = (chances['CODEX-DECALS'] != '')
-    codex = (chances['CODEX3-LSDR10'] != '')
+    try:
+        codex = (chances['CODEX'] != '')
+    except KeyError:
+        codex = (chances['CODEX3-LSDR10'] != '')
+    codex = (chances['CODEX'] != '') | (chances['CODEX3-LSDR10']!= '')
     print(f'{codex.sum()} in CODEX:')
     print(tbl[codex])
     # radio
@@ -1186,6 +1288,16 @@ def summarize_ancillary(args, chances):
     print(tbl[decam & (splus | lovoccs | mk | clashvlt)])
     print()
     return cols
+
+
+def summarize_masses(args, chances):
+    print('\n\n')
+    cols = ['name', 'z'] \
+        + [col for col in chances.colnames if '500' in col or '200' in col]
+    for i in range(0, chances['name'].size, 30):
+        print(chances[cols][i:i+30])
+    return
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
