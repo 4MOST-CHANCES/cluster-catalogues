@@ -6,3 +6,5 @@ __pycache__
 
 aux/
 catalogues-v0/
+catalogues-previous/
+plots/
