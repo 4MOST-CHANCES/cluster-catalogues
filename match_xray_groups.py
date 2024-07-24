@@ -15,7 +15,7 @@ from collate_info import chances_catalog, parse_args
 def main():
     args = parse_args()
     chances = Table.read(
-        #f"catalogues/clusters_chances_{args.sample}_{date.today()}.csv",
+        # f"catalogues/clusters_chances_{args.sample}_{date.today()}.csv",
         f"final-catalogues/lowz_axes_primary_{date.today()}.csv",
         format="ascii.csv",
     )
