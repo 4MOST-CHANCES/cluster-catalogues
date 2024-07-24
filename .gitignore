@@ -1,8 +1,12 @@
 *~
 *.save
+._*
+*.DS_Store
 
 __pycache__
 .ipynb_checkpoints
 
 aux/
 catalogues-v0/
+catalogues-previous/
+plots/
