@@ -187,8 +187,9 @@ def main():
         label="Redshift",
     )
     cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
-    output = "plots/sky_distribution.png"
-    savefig(output, fig=fig, tight=False)
+    for ext in ("png", "pdf"):
+        output = f"plots/sky_distribution.{ext}"
+        savefig(output, fig=fig, tight=False, close=False)
     return
 
 
