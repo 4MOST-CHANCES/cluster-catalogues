@@ -22,6 +22,7 @@ def main():
     for cluster in lowz:
         j = (codex['CODEX3'] == cluster['CODEXID'])
         if j.sum() == 0 or not np.any(j):
+            print(f'{name:8s} {z:5.3f}')
             continue
         name = cluster['name']
         z = cluster['z']
