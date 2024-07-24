@@ -437,8 +437,13 @@ def selection_function(m, m0, sigma, a_m=0):
 ### External catalogs ###
 
 
+<<<<<<< HEAD
 def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     use_axesls = True
+=======
+def load_ancillary(args, catalog, catalog_name):
+    use_codex3 = True
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     # these are the ones from which I might get a mass
     catalog, psz = load_catalog(args, catalog, "psz2")
     catalog, act = load_catalog(args, catalog, "act-dr5")
@@ -458,10 +463,20 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     for szcat in (psz, act, sptecs, sptsz, mcxc):
         idxcol = f"{szcat.label}_idx"
         rng = np.arange(szcat.obj.size, dtype=int)
+<<<<<<< HEAD
         catalog[idxcol] = [
             rng[szcat.obj == obj][0] if obj != "" else -99
             for obj in catalog[szcat.label]
         ]
+=======
+        catalog[idxcol] \
+            = [rng[szcat.obj == obj][0] if obj != '' else -99
+               for obj in catalog[szcat.label]]
+    #if 'SPLUS' not in catalog.colnames:
+    catalog = load_splus(args, catalog)
+    catalog, codex = load_codex(args, catalog)
+    catalog, codex3 = load_codex3(args, catalog)
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     ic(codex)
     # other catalogs
     catalog, mk = load_meerkat(args, catalog)
@@ -477,6 +492,7 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     ic(catalog)
 
     # add masses
+<<<<<<< HEAD
     catalog.masscols = {}
     catalog.factors = {}
     catalog = add_masses(catalog, psz, "MSZ", 1.10, massdef="500c", cosmo=cosmo)
@@ -503,6 +519,41 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     # )
     # it has 2 clusters in common with ACT and the
     catalog = add_masses(catalog, wings, "m200", 0.76, massdef="200c", cosmo=cosmo)
+=======
+    catalog = add_masses(catalog, psz, 'MSZ', 10**0.13)
+    catalog = add_masses(catalog, act, 'M500cCal', None)
+    catalog = add_masses(catalog, spt, 'M500c', None)
+    catalog = add_masses(catalog, mcxc, 'M500', 10**0.18)
+    catalog = add_masses(catalog, codex, 'M500', None)
+    # this one found comparing to codex
+    catalog = add_masses(catalog, codex3, 'M500', 1.06)
+
+    plot_codex_mass_ratio(catalog)
+
+    ic(np.sort(catalog.colnames))
+    if args.sample == 'lowz':
+        catalog['m500'] = catalog['m500_CODEX']
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_CODEX3'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_PSZ2_corr'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_MCXC_corr'][catalog['m500'] == -1]
+    else:
+        catalog['m500'] = catalog['m500_ACT']
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_SPT'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_PSZ2_corr'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_CODEX'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = 1.06 * catalog['m500_CODEX3'][catalog['m500'] == -1]
+        catalog['m500'][catalog['m500'] == -1] \
+            = catalog['m500_MCXC_corr'][catalog['m500'] == -1]
+    catalog = calculate_m200(catalog)
+    ic(catalog)
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
 
     plot_codex_mass_ratio(args, catalog)
 
@@ -669,6 +720,7 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
 
     summarize_ancillary(args, catalog)
     summarize_masses(args, catalog)
+<<<<<<< HEAD
     print("\n----")
     for catname in ("CODEX", "PSZ2", "eRASS1", "CoMaLit"):
         print(catname)
@@ -697,6 +749,8 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     )
     output = "plots/m500_psz_mcxc.png"
     savefig(output, fig=fig)
+=======
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
 
     if args.sample == "lowz":
         w = catalog["m200_WINGS"] > -1
@@ -730,6 +784,7 @@ def get_most_massive(args, cat, chances, n=200):
     print(np.sort(cat.colnames))
     jsort = np.argsort(cat.mass[mask])[-n:]
     most_massive = Table(
+<<<<<<< HEAD
         {
             "name": cat.obj[mask][jsort],
             "ra": cat.ra[mask][jsort],
@@ -749,6 +804,21 @@ def get_most_massive(args, cat, chances, n=200):
     )
     for col in ("ra", "dec", "z"):
         most_massive.catalog[col].format = "%.3f"
+=======
+        {'name': cat.obj[mask][jsort],
+         'ra': cat.ra[mask][jsort],
+         'dec': cat.dec[mask][jsort],
+         'z': cat.z[mask][jsort],
+         cat.masscol: cat.mass[mask][jsort]})
+    most_massive[cat.masscol].format = '.2f'
+    most_massive.sort('name')
+    most_massive = ClusterCatalog(
+        'Most Massive', most_massive,
+        base_cols=('name','ra','dec','z'),
+        masscol=cat.masscol)
+    for col in ('ra', 'dec', 'z'):
+        most_massive.catalog[col].format = '%.3f'
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     # compliance...
     most_massive.catalog["coords"] = most_massive.coords
     # match names with chances
@@ -769,6 +839,7 @@ def get_most_massive(args, cat, chances, n=200):
     return tbl
 
 
+<<<<<<< HEAD
 def plot_codex_mass_ratio(args, catalog, s=50):
     def annotate_cluster(row, x, z, ratio, j, log=True):
         name = catalog["name"][j]
@@ -780,12 +851,27 @@ def plot_codex_mass_ratio(args, catalog, s=50):
         )
         return
 
+=======
+def plot_codex_mass_ratio(catalog, s=50):
+    def annotate_cluster(row, x, z, ratio, j, log=True):
+        name = catalog['name'][j]
+        ic(name, z[j], ratio[j]-1)
+        dx = 0.1*x[j] if log else 0.05
+        row[1].text(
+            x[j]+dx, ratio[j]-1, name,
+            ha='left', va='center', fontsize=14)
+        row[2].text(
+            z[j]+0.002, ratio[j]-1, name,
+            ha='left', va='center', fontsize=14)
+        return
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     def plot_row(row, x, y, z, xlabel, ylabel, log=True):
         im_m = row[0].scatter(x, y, c=z, s=s)
         row[0].set(xlabel=xlabel, ylabel=ylabel)
         valid = (x > 0) & (y > 0)
         ratio = y / x
         r0 = np.median(ratio[valid])
+<<<<<<< HEAD
         e = np.abs(np.percentile(ratio[valid], [16, 84]) - r0) / (valid.size - 1) ** 0.5
         label = rf"$\langle x\rangle = {r0:.3f}_{{{-e[0]:.3f}}}^{{+{e[1]:.3f}}}$"
         row[1].scatter(x[valid], ratio[valid] - 1, c=z[valid], s=s)
@@ -801,6 +887,25 @@ def plot_codex_mass_ratio(args, catalog, s=50):
         mbar = plt.colorbar(
             im_z, ax=row[2], label=xlabel, orientation="vertical", aspect=10
         )
+=======
+        e = np.abs(np.percentile(ratio[valid], [16, 84]) - r0) \
+            / (valid.size - 1)**0.5
+        label = rf'$\langle x\rangle = {r0:.3f}_{{{-e[0]:.3f}}}^{{+{e[1]:.3f}}}$'
+        row[1].scatter(x[valid], ratio[valid]-1, c=z[valid], s=s)
+        row[1].axhline(0, ls='--', color='k', lw=2)
+        row[1].set(xlabel=xlabel, ylabel=f'{ylabel} / {xlabel}')
+        if log:
+            row[0].set(xscale='log', yscale='log')
+            row[1].set(xscale='log')
+        norm = LogNorm(vmin=1e14, vmax=3e15) if log else Normalize()
+        im_z = row[2].scatter(
+            z[valid], ratio[valid]-1, c=x[valid], s=s, norm=norm)
+        row[2].axhline(0, ls='--', color='k', lw=2)
+        row[2].set(xlabel='Redshift')
+        mbar = plt.colorbar(
+            im_z, ax=row[2], label=xlabel,
+            orientation='vertical', aspect=10)
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
         # so that they are neither the maxima nor minima, for annotation
         ratio[np.isnan(ratio) | (ratio < 0)] = 1
         for j in np.argsort(ratio)[:3]:
@@ -810,6 +915,7 @@ def plot_codex_mass_ratio(args, catalog, s=50):
         return im_m, im_z
 
     ic(np.sort(catalog.colnames))
+<<<<<<< HEAD
     ic(catalog[["name", "z", "m200_CODEX", "m200_AXES-LEGACY"]])
     codex_mass_ratio = catalog["m200_AXES-LEGACY"] / catalog["m200_CODEX"]
     fig, axes = plt.subplots(3, 3, figsize=(16, 14), constrained_layout=True)
@@ -869,6 +975,48 @@ def plot_codex_mass_ratio(args, catalog, s=50):
 
 
 def review_missing(args, chances, psz, act, sptecs, sptsz, codex, mcxc):
+=======
+    ic(catalog[['name','z','m500_CODEX','m500_CODEX3']])
+    codex_mass_ratio = catalog['m500_CODEX3'] / catalog['m500_CODEX']
+    fig, axes = plt.subplots(
+        3, 3, figsize=(16,14), constrained_layout=True)
+    # m500
+    m500_codex = 1e14 * catalog['m500_CODEX']
+    m500_codex3 = 1e14 * catalog['m500_CODEX3']
+    im_m, im_z = plot_row(
+        axes[0], m500_codex, m500_codex3, catalog['z'],
+        '$M_{500}^\mathrm{CODEX}$', '$M_{500}^\mathrm{CODEX3}$')
+    # m200
+    m200_codex, c200_codex, r200_codex, d200_codex \
+        = calculate_m200_from_m500(m500_codex, catalog['z'])
+    m200_codex3, c200_codex3, r200_codex3, d200_codex3 \
+        = calculate_m200_from_m500(m500_codex3, catalog['z'])
+    im_m, im_z = plot_row(
+        axes[1], m200_codex, m200_codex3, catalog['z'],
+        '$M_{200}^\mathrm{CODEX}$', '$M_{200}^\mathrm{CODEX3}$')
+    # r200
+    im_m, im_z = plot_row(
+        axes[2], r200_codex, r200_codex3, catalog['z'],
+        '$d_{200}^\mathrm{CODEX}$', '$d_{200}^\mathrm{CODEX3}$', log=False)
+    # references
+    m = 1e14 * np.linspace(1, 30, 22)
+    for row in axes[:2]:
+        row[0].plot(m, m, 'k--', lw=2)
+    r = np.linspace(0.5, 2, 10)
+    axes[2,0].plot(r, r, 'k--', lw=2)
+    # colorbars
+    zbar = plt.colorbar(
+        im_m, ax=axes[-1,:2], label='Redshift', orientation='horizontal',
+        aspect=18)
+    zbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
+    output = 'plots/codex_mass_ratio.png'
+    savefig(output, fig=fig, tight=False)
+    sys.exit()
+    return
+
+
+def review_missing(args, chances, psz, act, spt, codex, mcxc):
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     # are we missing massive clusters?
     # these are the minimal constraints: redshift, declination and DECam
     # availability
@@ -932,12 +1080,21 @@ def review_missing(args, chances, psz, act, sptecs, sptsz, codex, mcxc):
         }
     )
     # Catalog object
+<<<<<<< HEAD
     szmassive.sort("name")
     szmassive = ClusterCatalog(
         "Missing Massive", szmassive, base_cols=("name", "ra", "dec", "z")
     )
     for col in ("ra", "dec", "z"):
         szmassive.catalog[col].format = "%.3f"
+=======
+    szmassive.sort('name')
+    szmassive = ClusterCatalog(
+        'Missing Massive', szmassive,
+        base_cols=('name','ra','dec','z'))
+    for col in ('ra', 'dec', 'z'):
+        szmassive.catalog[col].format = '%.3f'
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     # also for consistency with CHANCES
     szmassive.catalog["coords"] = szmassive.coords
 
@@ -1088,12 +1245,19 @@ def calculate_m200(chances, cosmo=Planck18):
     )
     # these have a mass in Ciria's file but not in the catalogues we
     # review here
+<<<<<<< HEAD
     ic(chances["m200_listed"][with_listed_m200] / m200[with_listed_m200])
     m200[with_listed_m200] = 1e14 * chances["m200_listed"][with_listed_m200]
     # need to make sure this is consistent with calculate_m200_from_m500
     r200[with_listed_m200], d200[with_listed_m200] = radius_from_m200(
         nfw_with_listed_m200, cosmo=cosmo
     )
+=======
+    ic(chances['m200_listed'][with_listed_m200] / m200[with_listed_m200])
+    m200[with_listed_m200] = 1e14 * chances['m200_listed'][with_listed_m200]
+    r200[with_listed_m200], d200[with_listed_m200] \
+        = radius_from_m200(nfw_with_listed_m200, cosmo=cosmo)
+>>>>>>> db3b3c2 (CODEX masses with first priority, else CODEX3)
     ic(r200)
     chances["m200"] = m200 / 1e14
     chances["c200"] = c200
