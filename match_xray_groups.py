@@ -15,7 +15,7 @@ from collate_info import chances_catalog, parse_args
 def main():
     args = parse_args()
     chances = Table.read(
-        #f"catalogues/clusters_chances_{args.sample}_{date.today()}.csv",
+        # f"catalogues/clusters_chances_{args.sample}_{date.today()}.csv",
         f"final-catalogues/lowz_axes_primary_{date.today()}.csv",
         format="ascii.csv",
     )
@@ -50,7 +50,7 @@ def main():
 
 
 def load_axes2mrs():
-    filename = "aux/xray/Xmass_BayesGroups_n3ext200kpc_nofake_info.fits"
+    filename = "aux/xray/Xmass_BayesGroups_n3ext200kpc_nofake_info2.fits"
     cols = [
         "C3ID",
         "RA_X",
@@ -69,23 +69,9 @@ def load_axes2mrs():
 
 
 def load_axesls():
-    filename = "aux/xray/Xmass_c3_LSDR10updated_info_nofilters_clean.fits"
-    cols = [
-        "C3",
-        "RA_X",
-        "Dec_X",
-        "z_best",
-        "LAMBDA",
-        "Lx0124",
-        "eLx",
-        "M200c",
-        "eM200c",
-        "R200c_deg",
-    ]
-    axesls = Table(fits.open(filename)[1].data)[cols]
-    axesls.rename_columns(
-        ["C3", "Dec_X", "z_best", "Lx0124"], ["AXES", "DEC_X", "z", "Lx"]
-    )
+    filename = "aux/xray/Xmass_axes_legacy.cat"
+    cols = ["CODEX3", "RA_X", "DEC_X", "zcmb", "Lx", "M200c", "eM200c", "sigma"]
+    axesls = Table.read(filename, format="ascii.commented_header")
     axesls["LEGACY"] = 1
     return axesls
 
@@ -113,23 +99,27 @@ def match_catalogs(args, chances, cat, radius):
     for i, cl in enumerate(cat):
         if not np.any(within_5r200[i]):
             continue
-        for ch in chances["CHANCES_FIELD", "z", "M200c", "R200c_deg", "coords"][within_5r200[i]]:
+        for ch in chances["CHANCES_FIELD", "z", "M200c", "R200c_deg", "coords"][
+            within_5r200[i]
+        ]:
             sep = cl["coords"].separation(ch["coords"]).to("deg").value
             if sep == 0 * u.deg:
                 continue
             vpec = (clight * (cl["z"] - ch["z"]) / (1 + ch["z"])).to("km/s").value
             # excluding coords
-            row = (
-                list(ch)[:-1]
-                + list(cl)[:-1]
-                + [sep, sep / ch["R200c_deg"]]
-                + [vpec]
-            )
+            row = list(ch)[:-1] + list(cl)[:-1] + [sep, sep / ch["R200c_deg"]] + [vpec]
             row = [i if i != "masked" else -1 for i in row]
             new.add_row(row)
     for col in ("LEGACY", "2MRS"):
         new[col] = np.max([new[col], np.zeros(new[col].size, dtype=int)], axis=0)
-    for col in ("z_LEGACY", "z", "CHANCES_z", "CHANCES_R200c_deg", "CHANCES_DIST_deg", "R200c_deg"):
+    for col in (
+        "z_LEGACY",
+        "z",
+        "CHANCES_z",
+        "CHANCES_R200c_deg",
+        "CHANCES_DIST_deg",
+        "R200c_deg",
+    ):
         new[col].format = "%.4f"
     for col in ("RA_X", "DEC_X"):
         new[col].format = "%.5f"

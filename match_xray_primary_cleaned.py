@@ -24,9 +24,9 @@ def main():
     primary = primary[primary["AXES"] != -1]
     # we also decided to remove Alessia's groups -- note the additional space in the name
     for f in primary["CHANCES_FIELD"]:
-        print(f'--{f}--')
+        print(f"--{f}--")
     # print(primary[primary["CHANCES_FIELD"] == "AM2002 "])
-    #primary = primary[primary["CHANCES_FIELD"] != "AM2002 "]
+    # primary = primary[primary["CHANCES_FIELD"] != "AM2002 "]
     primary = primary[~np.isin(primary["CHANCES_FIELD"], ("AM2002 ", "A2877  "))]
     print(primary)
 
