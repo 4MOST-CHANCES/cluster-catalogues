@@ -49,9 +49,17 @@ def main():
     axstartdeg = 15 * (axcenter - 12)
     lowz = ClusterCatalog("chances-lowz")
     evol = ClusterCatalog("chances-evol")
+    lowz.catalog = lowz[~np.isin(lowz["name"], ["Abell 3389", "Abell 4038"])]
+    lowz.catalog.sort("d200")
+    evol.catalog.sort("d200")
+    print(lowz)
+    print(evol)
     # evol_near = evol["z"] <= 0.1
     # sample = vstack([lowz.catalog, evol.catalog[evol_near]])
     sample = vstack([lowz.catalog, evol.catalog])
+    # this way smaller points will always show on top of larger points, easing visibility
+    sample.sort("d200")
+    sample = sample[::-1]
     for col in ("ra", "dec"):
         sample[col].format = ".5f"
     print(sample)
@@ -134,22 +142,23 @@ def main():
         xy = subdivide_vertices(sc.footprint[0], 100)
         ax.plot(
             *np.transpose(xy),
-            "C0-",
+            "-",
+            color=(0.2, 0.6, 0),
             transform=ax.get_transform("world"),
             lw=3,
-            zorder=100,
+            zorder=1000,
         )
     area_total = 0
     area_lowz = 0
     for i, cl in enumerate(sample):
         circle = Circle(
             (cl["ra"], cl["dec"]),
-            5 * cl["d200"] / 60,
+            max(5 * cl["d200"] / 60, 1),
             ec="k",
             fc=colors[i],
-            alpha=0.6,
+            alpha=0.8,
             lw=1,
-            zorder=99,
+            zorder=99 + i,
             transform=ax.get_transform("world"),
         )
         ax.add_patch(circle)
