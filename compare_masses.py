@@ -8,6 +8,7 @@ from icecream import ic
 from matplotlib import pyplot as plt, ticker
 import numpy as np
 from scipy.optimize import curve_fit
+import sys
 
 from plottery.plotutils import savefig, update_rcParams
 
@@ -74,6 +75,7 @@ def main():
     axesls = Table.read(
         "aux/xray/Xmass_axes_legacy.cat", format="ascii.commented_header"
     )
+    axesls.rename_column("zcmb", "z")
     print(np.sort(axes2mrs.colnames))
     print(np.sort(axesls.colnames))
     # axes2mrs = axes2mrs[axes2mrs["z"] <= 0.04]
@@ -262,6 +264,17 @@ def main():
         ymask=psz_in_wings,
     )
     fit_and_plot(
+        "PSZ2",
+        "WINGS",
+        psz,
+        wings,
+        "m200",
+        "m200",
+        "m200_err",
+        xmask=psz_in_wings,
+        ymask=psz_wings_closest[psz_in_wings],
+    )
+    fit_and_plot(
         "WINGS",
         "ACT-DR5",
         psz,
@@ -316,6 +329,7 @@ def main():
         xmask=act_mcxc_closest[act_in_mcxc],
         ymask=act_in_mcxc,
     )
+    sys.exit()
     fit_and_plot(
         "CODEX",
         "AXES-2MRS",
@@ -433,6 +447,10 @@ def fit_and_plot(
             zorder=10,
             label=f"y = {10**fit_norm[0]:.2f}x",
         )
+    if xlabel == "MCXC" and ylabel == "ACT-DR5":
+        mask = y[ycol][ymask] > 10 * x[xcol][xmask]
+        print(x["name", "OName", "AName", "z", "m200"][xmask][mask])
+        print(y["name", "SNR", "z", "M500cCal", "m200"][ymask][mask])
     ax.plot(10**xrng, 10**xrng, "-", color="0.5", lw=2, zorder=10, label="y = x")
     ax.legend(loc="upper left", fontsize=15)
     xsub = xcol[1:].replace("_", ",")
@@ -442,7 +460,7 @@ def fit_and_plot(
         yscale="log",
         xlabel=f"$M_\\mathrm{{{xsub}}}^\\mathrm{{{xlabel}}}$ (M$_\odot$)",
         ylabel=f"$M_\\mathrm{{{ysub}}}^\\mathrm{{{ylabel}}}$ (M$_\odot$)",
-        xlim=(2e13, 5e15),
+        xlim=(3e13, 5e15),
         ylim=(8e13, 5e15),
     )
     output = f"plots/compare_masses/masses_{xlabel.lower()}_{ylabel.lower()}"
@@ -516,6 +534,7 @@ def load_codex():
     # codex["eM500c"] = codex["eM200c"] * codex["M500/M200"]
     codex = codex[codex["lambda"] > 33.5 * 0.7 * (codex["z_lambda"] / 0.15) ** 0.8]
     codex["coords"] = SkyCoord(codex["RA_X-ray"], codex["Dec_X-ray"], unit="deg")
+    codex.rename_column("z_lambda", "z")
     return codex
 
 
@@ -551,6 +570,14 @@ def load_wings():
     wings = ascii.read(filename, format="csv")
     wings.rename_columns(["CLUSTER", "z_cl", "logM200"], ["name", "z", "m200"])
     wings["m200"] = 10 ** wings["m200"]
+    wings["m200_err"] = (
+        wings["m200"]
+        * (wings["sigma_cl_err_min"] + wings["sigma_cl_err_max"])
+        / wings["sigma_cl"]
+    )
+    wings["m200_err"][wings["m200_err"] < 1] = (
+        0.1 * wings["m200"][wings["m200_err"] < 1]
+    )
     wings = join(
         wings, wings_positions["name", "ra", "dec"], keys="name", join_type="left"
     )
@@ -559,11 +586,12 @@ def load_wings():
     return wings
 
 
-def match_catalogs(ref, cat, radius=5 * u.arcmin):
+def match_catalogs(ref, cat, radius=5 * u.arcmin, dz=0.1):
     dist = ref["coords"].separation(cat["coords"][:, None])
     closest = np.argmin(dist, axis=0)
-    matches = np.min(dist, axis=0) < radius
-    # print(f"{matches.sum()}/{matches.size} matches")
+    matches = (np.min(dist, axis=0) < radius) & (
+        np.abs(ref["z"] - cat["z"][closest]) / ref["z"] <= dz
+    )
     return closest, matches
 
 
