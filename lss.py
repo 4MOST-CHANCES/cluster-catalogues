@@ -11,10 +11,13 @@ from glob import glob
 from icecream import ic
 from matplotlib import pyplot as plt, ticker
 from matplotlib.cm import ScalarMappable
+from matplotlib.collections import PatchCollection
 from matplotlib.colors import LinearSegmentedColormap, Normalize
+from matplotlib.patches import Circle
 import numpy as np
 import os
 from scipy.interpolate import CubicSpline
+from scipy.ndimage import gaussian_filter
 from scipy.stats import gaussian_kde
 import seaborn as sns
 from time import time
@@ -45,12 +48,16 @@ def main():
         )
     else:
         chances = ClusterCatalog(f"chances-{args.sample[:4]}")
+    chances.catalog["sigma"] = velocity_dispersion_from_mass(chances)
+    chances.catalog["sigma"].format = "%.0f"
     chances, cat = find_subclusters(args, chances)
+    print(chances)
     cat = add_r200(cat)
     print(cat)
     if args.sample == "all":
         infall_mass_function(args, chances, cat, plottype="hist")
-        phase_space(args, chances, cat)
+        phase_space(args, chances, cat, yaxis="sigma")
+        phase_space(args, chances, cat, yaxis="km/s")
     else:
         wrap_plot_sky(args, chances, cat, show_neighbors=False)
         wrap_plot_sky(args, chances, cat, show_neighbors=True, suffix="neighbors")
@@ -132,34 +139,105 @@ def infall_mass_function(args, chances, cat, hide_main=True, plottype="kde"):
     savefig(output, fig=fig, tight=False)
 
 
-def phase_space(args, chances, cat, hide_main=True):
+def phase_space(
+    args, chances, cat, hide_main=True, sigma_clip=0, yaxis="sigma", show_histogram=True
+):
     cat.sort("best_z")
-    cat = cat[::-1]
-    z_main = np.array([chances["z"][chances["name"] == cl] for cl in cat["chances"]])
-    fig, ax = plt.subplots(figsize=(9, 6), layout="constrained")
+    # sort by something random so the figure is not dominated by any single redshift
+    cat.sort("dist (r200)")
+    z_main = np.array([chances["z"][chances["name"] == cl] for cl in cat["chances"]])[
+        :, 0
+    ]
+    sigma_main = np.array(
+        [chances["sigma"][chances["name"] == cl] for cl in cat["chances"]]
+    )[:, 0]
+    r200_main = np.array(
+        [chances["r200"][chances["name"] == cl] for cl in cat["chances"]]
+    )[:, 0]
+    if show_histogram:
+        fig, axes = plt.subplots(
+            1,
+            2,
+            figsize=(9, 6),
+            sharey=True,
+            width_ratios=(4, 1.2),
+            layout="constrained",
+        )
+        ax, hax = axes
+    else:
+        fig, ax = plt.figure(figsize=(9, 6), layout="constrained")
+        axes = ax
     if hide_main:
         mask = cat["is_main"] == 0
     else:
         mask = np.ones(cat["is_main"].size, dtype=bool)
+    if sigma_clip > 0:
+        mask = mask & (
+            light * np.abs(cat["best_z"] - z_main) / (1 + z_main)
+            < sigma_clip * sigma_main
+        )
+    yval = cat["vpec (km/s)"]
+    if yaxis == "sigma":
+        yval = yval / sigma_main
+    else:
+        yval = yval / 1e3
+    # note that changing axes limits or figure size will change the symbol size
+    s_factor = 34000
     im = ax.scatter(
         cat["dist (r200)"][mask],
-        cat["vpec (km/s)"][mask] / 1e3,
-        s=cat["m200"][mask] / 1e12,
+        yval[mask],
+        # s=cat["m200"][mask] / 1e12,
+        s=s_factor * (cat["r200"][mask] / r200_main[mask]) ** 2 / 30,
         c=z_main[mask],
         alpha=0.5,
     )
-    cbar = plt.colorbar(im, ax=ax)
+    # use this to find the size that gives a radius of 1 in data units
+    # ax.scatter(1, -3, s=34000, c="k")
+    # ax.grid()
+    # circles = [Circle((d, y), s, color=)]
+    if show_histogram:
+        # beware this should change if axis limits change
+        if yaxis == "sigma":
+            vbins = np.arange(-6, 6, 1e-3)
+        else:
+            vbins = np.arange(-10, 10, 1e-3)
+        vx = (vbins[1:] + vbins[:-1]) / 2
+        hmask = mask & (yval >= vx[0]) & (yval <= vx[-1])
+        smooth = 0.2
+        hist = np.histogram(yval[hmask], vbins)[0]
+        kde = gaussian_kde(yval[hmask], smooth)
+        hax.plot(kde(vx), vx, "k-")
+        # evolution
+        evol = z_main > 0.07
+        kde_evol = gaussian_kde(yval[hmask & evol], smooth)
+        hax.plot(kde_evol(vx), vx, "C0-", label="Evolution")
+        kde_lowz = gaussian_kde(yval[hmask & ~evol], smooth)
+        hax.plot(kde_lowz(vx), vx, "C3-", label="Low-z")
+        hax.set_xticks([])
+        hax.legend(loc="lower right", fontsize=14)
+        cbar = plt.colorbar(im, ax=axes, orientation="horizontal", location="top")
+        cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
+    else:
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
     cbar.set_label("Main cluster redshift")
-    cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
     ax.axhline(0, color="k", lw=1, ls="--")
     ax.set(
         xlabel="$r_\mathrm{proj}/r_{200}$",
-        ylabel="$v_\mathrm{pec}$ ($10^3$ km s$^{-1}$)",
         xlim=(0, 5.1),
     )
-    ax.yaxis.set_major_locator(ticker.MultipleLocator(5))
-    output = "plots/lss/phase_space.pdf"
-    savefig(output, fig=fig, tight=False)
+    output = "plots/lss/phase_space"
+    if yaxis == "sigma":
+        ax.set(ylabel="$v_\\mathrm{pec}/\\sigma_\\mathrm{main}$", ylim=(-6, 6))
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
+        output = f"{output}_sigma"
+    else:
+        ax.set(ylabel="$v_\\mathrm{pec}$ ($10^3$ km s$^{-1}$)")
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(5))
+    if show_histogram:
+        output = f"{output}_hist"
+
+    savefig(f"{output}.pdf", fig=fig, tight=False)
     return
 
 
@@ -359,20 +437,20 @@ def plot_sky(
     subcl = subcl[::-1]
     if z0 is None:
         z0 = cl["z"]
-    for scl in subcl:
+    for i, scl in enumerate(subcl):
         radius = scl["d200"]
         dv = light * (scl["best_z"] - z0) / (1 + z0)
-        dv = (dv + vmax) / (2 * vmax)
-        color = cmap(dv)
-        ax.mark_inset_circle(
-            ax,
-            get_center(scl),
-            f"{radius} deg",
-            facecolor=color,
-            alpha=0.7,
-            lw=0,
-            zorder=9,
-        )
+        dvc = (dv + vmax) / (2 * vmax)
+        color = list(cmap(dvc))
+        # add transparency - doing it this way to also have transparency in the edge color
+        color[-1] = 0.7
+        if np.abs(dv) < 3 * cl["sigma"]:
+            kwds = dict(lw=0, facecolor=color, edgecolor=color, zorder=9 + i)
+        else:
+            # to somewhat account for the thicker edge
+            radius = 0.98 * radius
+            kwds = dict(lw=2, facecolor="none", edgecolor=color, zorder=99 + i)
+        ax.mark_inset_circle(ax, get_center(scl), f"{radius} deg", **kwds)
     if show_main and mask.sum() > 0:
         is_main = subcl["is_main"] == 1
         if is_main.sum() > 0:
@@ -382,7 +460,7 @@ def plot_sky(
                 color="w",
                 ms=12,
                 mew=0,
-                zorder=10,
+                zorder=1000,
             )
     ax.plot(
         cl["ra"],
@@ -391,7 +469,7 @@ def plot_sky(
         transform=ax.get_transform("world"),
         mew=2,
         ms=8,
-        zorder=11,
+        zorder=1001,
     )
     if annotate:
         ax.annotate(
@@ -404,8 +482,8 @@ def plot_sky(
         )
         label = cl["name"].replace("-", "$-$").replace(" 00", " ").replace(" 0", " ")
         ax.annotate(
-            f'{label} (z={cl["z"]:.3f}, $\\theta_{{200}}={cl["d200"]:.1f}\'$)',
-            xy=(0.06, 0.06),
+            f'{label}\n(z={cl["z"]:.3f}, $\\theta_{{200}}={cl["d200"]:.1f}\', \\sigma={cl["sigma"]:.0f}$ km s$^{{-1}}$)',
+            xy=(0.06, 0.04),
             xycoords="axes fraction",
             ha="left",
             va="bottom",
@@ -503,10 +581,15 @@ def find_subclusters(
     chances.catalog[f"N_{args.catalog}"] = np.zeros(chances.size, dtype=int)
     # fixed
     dz_phot = dz_frac_max * cat["z"]
-    for i, (cl, coord, z, d200, r200) in tqdm(
+    for i, (cl, coord, z, d200, r200, sigma) in tqdm(
         enumerate(
             zip(
-                chances.obj, chances.coords, chances.z, chances["d200"], chances["r200"]
+                chances.obj,
+                chances.coords,
+                chances.z,
+                chances["d200"],
+                chances["r200"],
+                chances["sigma"],
             )
         ),
         total=chances.size,
@@ -554,6 +637,14 @@ def find_subclusters(
     print(matches[matches[lambdacol] - matches[f"{lambdacol}_e"] >= 5])
     matches.write(output, format="ascii.fixed_width", overwrite=True)
     return chances, matches
+
+
+def velocity_dispersion_from_mass(chances):
+    """Munari et al. (2013), M200c. Note that the"""
+    A = 1177
+    alpha = 0.364
+    hz = cosmo.H(chances["z"]).value / 100
+    return A * (hz * 1e14 * chances["m200"] / 1e15) ** alpha
 
 
 def parse_args():
