@@ -477,33 +477,70 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     catalog, wings = load_wings(args, catalog)
     ic(catalog)
 
-    # add masses
+    # add masses - these include the redshift matching
     catalog.masscols = {}
     catalog.factors = {}
-    catalog = add_masses(catalog, psz, "MSZ", 1.10, massdef="500c", cosmo=cosmo)
-    catalog = add_masses(catalog, act, "M500cCal", massdef="500c", cosmo=cosmo)
-    catalog = add_masses(catalog, sptecs, "M500", massdef="500c", cosmo=cosmo)
-    catalog = add_masses(catalog, sptsz, "M500", massdef="500c", cosmo=cosmo)
-    catalog = add_masses(catalog, mcxc, "M500", 1.41, massdef="500c", cosmo=cosmo)
-    catalog = add_masses(catalog, codex, "M200c", 0.70, massdef="200c", cosmo=cosmo)
+    massfactors = {"psz2": 1.09, "codex": 0.69, "mcxc": 1.37}
+    massfactors["axes-2mrs"] = np.round(0.79 * massfactors["psz2"], 2)
+    massfactors["axes-ls"] = massfactors["axes-2mrs"]
+    massfactors["wings"] = 0.69 * massfactors["psz2"]
+    for col in (
+        "act-dr5",
+        "spt-ecs",
+        "spt-sz",
+        "comalit",
+        "meneacs",
+        "locuss",
+        "erass1",
+    ):
+        massfactors[col] = 1
+    mf = massfactors
+    catalog = add_masses(catalog, psz, "MSZ", mf["psz2"], massdef="500c", cosmo=cosmo)
+    catalog = add_masses(
+        catalog, act, "M500cCal", mf["act-dr5"], massdef="500c", cosmo=cosmo
+    )
+    catalog = add_masses(
+        catalog, sptecs, "M500", mf["spt-ecs"], massdef="500c", cosmo=cosmo
+    )
+    catalog = add_masses(
+        catalog, sptsz, "M500", mf["spt-sz"], massdef="500c", cosmo=cosmo
+    )
+    catalog = add_masses(catalog, mcxc, "M500", mf["mcxc"], massdef="500c", cosmo=cosmo)
+    catalog = add_masses(
+        catalog, codex, "M200c", mf["codex"], massdef="200c", cosmo=cosmo
+    )
     # catalog = add_masses(
     #     catalog, codex, "M200c_sigma", 1.13, massdef="200c", cosmo=cosmo
     # )
-    catalog = add_masses(catalog, comalit, "M200c", massdef="200c", cosmo=cosmo)
+    catalog = add_masses(
+        catalog, comalit, "M200c", mf["comalit"], massdef="200c", cosmo=cosmo
+    )
     # here we fix factor=1 because the comparison to ACT is affected
     # by the merging of double clusters in AXES
-    catalog = add_masses(catalog, axes2mrs, "M200c", 0.88, massdef="200c", cosmo=cosmo)
-    catalog = add_masses(catalog, axesls, "M200c", 0.88, massdef="200c", cosmo=cosmo)
+    catalog = add_masses(
+        catalog, axes2mrs, "M200c", mf["axes-2mrs"], massdef="200c", cosmo=cosmo
+    )
+    catalog = add_masses(
+        catalog, axesls, "M200c", mf["axes-ls"], massdef="200c", cosmo=cosmo
+    )
     # have not tested these
-    catalog = add_masses(catalog, meneacs, "m200", 1, massdef="200c", cosmo=cosmo)
-    catalog = add_masses(catalog, locuss, "M200", 1, massdef="200c", cosmo=cosmo)
-    catalog = add_masses(catalog, erass, "M500", 1, massdef="500c", cosmo=cosmo)
+    catalog = add_masses(
+        catalog, meneacs, "m200", mf["meneacs"], massdef="200c", cosmo=cosmo
+    )
+    catalog = add_masses(
+        catalog, locuss, "M200", mf["locuss"], massdef="200c", cosmo=cosmo
+    )
+    catalog = add_masses(
+        catalog, erass, "M500", mf["erass1"], massdef="500c", cosmo=cosmo
+    )
     # this one obtained by comparing to PSZ - hence the 1.10
     # catalog = add_masses(
     #     catalog, wings, "m200", 0.69 * 1.10, massdef="200c", cosmo=cosmo
     # )
     # it has 2 clusters in common with ACT and the
-    catalog = add_masses(catalog, wings, "m200", 0.76, massdef="200c", cosmo=cosmo)
+    catalog = add_masses(
+        catalog, wings, "m200", massfactors["wings"], massdef="200c", cosmo=cosmo
+    )
 
     plot_codex_mass_ratio(args, catalog)
 
@@ -1384,6 +1421,7 @@ def add_masses(chances, cat, masscol, factor=1, cosmo=Planck18, massdef=None):
     chances[f"r200_{name}"][mask] = factor ** (1 / 3) * r200
     chances[f"m200_{name}"].format = "%.2e"
     chances[f"r200_{name}"].format = "%.2f"
+    chances[f"{name}_{masscol}"].format = "%.2e"
     chances.masscols[name] = f"{masscol}"
     chances.factors[name] = factor
     return chances
@@ -1770,6 +1808,15 @@ def load_wings(args, chances):
     wings = ascii.read(filename, format="csv")
     wings.rename_columns(["CLUSTER", "z_cl", "logM200"], ["name", "z", "m200"])
     wings["m200"] = 10 ** wings["m200"]
+    # make sure this is consistent with compare_masses
+    wings["m200_err"] = (
+        wings["m200"]
+        * ((wings["sigma_cl_err_min"] + wings["sigma_cl_err_max"]) / wings["sigma_cl"])
+        ** 3
+    )
+    wings["m200_err"][wings["m200_err"] < 1] = (
+        0.1 * wings["m200"][wings["m200_err"] < 1]
+    )
     wings = join(
         wings, wings_positions["name", "ra", "dec"], keys="name", join_type="left"
     )

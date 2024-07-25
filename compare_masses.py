@@ -329,7 +329,6 @@ def main():
         xmask=act_mcxc_closest[act_in_mcxc],
         ymask=act_in_mcxc,
     )
-    sys.exit()
     fit_and_plot(
         "CODEX",
         "AXES-2MRS",
@@ -572,8 +571,8 @@ def load_wings():
     wings["m200"] = 10 ** wings["m200"]
     wings["m200_err"] = (
         wings["m200"]
-        * (wings["sigma_cl_err_min"] + wings["sigma_cl_err_max"])
-        / wings["sigma_cl"]
+        * ((wings["sigma_cl_err_min"] + wings["sigma_cl_err_max"]) / wings["sigma_cl"])
+        ** 3
     )
     wings["m200_err"][wings["m200_err"] < 1] = (
         0.1 * wings["m200"][wings["m200_err"] < 1]
