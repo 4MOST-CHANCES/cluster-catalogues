@@ -1,3 +1,7 @@
+"""Mass redshift plots"""
+
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
 from matplotlib import pyplot as plt
@@ -6,11 +10,12 @@ import numpy as np
 from astro.clusters import ClusterCatalog
 from plottery.plotutils import savefig, update_rcParams
 
+from compare_masses import match_catalogs
+
 update_rcParams()
 
 
 def main():
-
     plot_sample("lowz")
     plot_sample("evolution", color="C0")
     plot_sample("lowz", south=True)
@@ -26,10 +31,9 @@ def clustercat(name, suffix="", mcol="m200"):
     cat.catalog[np.isnan(cat["m200"])] = -1
     if cat["m200"].max() < 1e10:
         cat.catalog["m200"][cat.z > 0] = 1e14 * cat["m200"][cat.z > 0]
-    # these are in units of 1e13 Msun
-    # if name == "erass1":
-    #     cat.catalog["m200"] /= 10
     cat.catalog["m200"].format = "%.2e"
+    if "coords" not in cat.colnames:
+        cat.catalog["coords"] = SkyCoord(ra=cat["ra"], dec=cat["dec"], unit="deg")
     return cat
 
 
@@ -44,6 +48,9 @@ def load_axes2mrs():
         base_cols=cols[:4],
         label="AXES-2MRS",
         masscol="M200c",
+    )
+    axes2mrs.catalog["coords"] = SkyCoord(
+        ra=axes2mrs["ra"], dec=axes2mrs["dec"], unit="deg"
     )
     return axes2mrs
 
@@ -76,7 +83,9 @@ def load_codex():
     return codex
 
 
-def plot_sample(sample, date="20240503", color="C3", south=False):
+def plot_sample(
+    sample, date="20240503", color="C3", south=False, match_radius=5 * u.arcmin
+):
     label = "Low-z" if sample == "lowz" else "Evolution"
     psz = clustercat("psz2")
     act = clustercat("act-dr5")
@@ -94,6 +103,38 @@ def plot_sample(sample, date="20240503", color="C3", south=False):
             axes2mrs = axes2mrs[(axes2mrs["dec"] > mindec) & (axes2mrs["dec"] < maxdec)]
     filename = f"catalogues/clusters_chances_{sample}_{date}_large.csv"
     chances = Table.read(filename, format="csv", comment="#")
+    chances["coords"] = SkyCoord(ra=chances["ra"], dec=chances["dec"], unit="deg")
+    # remove duplicates. Note that I only implemented this for the catalogues in the current version of the plot!
+    chances_psz_closest, chances_in_psz = match_catalogs(
+        psz, chances, radius=match_radius
+    )
+    if sample == "lowz":
+        axes2mrs_psz_closest, axes2mrs_in_psz = match_catalogs(
+            psz, axes2mrs, radius=match_radius
+        )
+        chances_axes2mrs_closest, chances_in_axes2mrs = match_catalogs(
+            axes2mrs, chances, radius=match_radius
+        )
+        print(
+            f"PSZ: {psz['name'].size}, AXES-2MRS matches: {axes2mrs_in_psz.sum()}, CHANCES matches: {chances_in_psz.sum()}"
+        )
+        print(
+            f"AXES-2MRS: {axes2mrs['name'].size}, CHANCES matches: {chances_in_axes2mrs.sum()}"
+        )
+        psz = psz[~axes2mrs_in_psz & ~chances_in_psz]
+        axes2mrs = axes2mrs[~chances_in_axes2mrs]
+    else:
+        act_psz_closest, act_in_psz = match_catalogs(psz, act, radius=match_radius)
+        chances_act_closest, chances_in_act = match_catalogs(
+            act, chances, radius=match_radius
+        )
+        print(
+            f"PSZ: {psz['name'].size}, ACT-DR5 matches: {act_in_psz.sum()}, CHANCES matches: {chances_in_psz.sum()}"
+        )
+        print(f"ACT-DR5: {act['name'].size}, CHANCES  matches: {chances_in_act.sum()}")
+        psz = psz[~act_in_psz & ~chances_in_psz]
+        act = act[~chances_in_act]
+    #
     fig, ax = plt.subplots(figsize=(6, 5), constrained_layout=True)
     ax.plot(
         chances["z"],
