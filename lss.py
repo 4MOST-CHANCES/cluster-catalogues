@@ -52,7 +52,7 @@ def main():
         infall_mass_function(args, chances, cat, plottype="hist")
         phase_space(args, chances, cat)
     else:
-        # wrap_plot_sky(args, chances, cat, show_neighbors=False)
+        wrap_plot_sky(args, chances, cat, show_neighbors=False)
         wrap_plot_sky(args, chances, cat, show_neighbors=True, suffix="neighbors")
     chances.catalog.sort(f"N_{args.catalog}")
     # print(chances)
@@ -267,7 +267,7 @@ def wrap_plot_sky(
         # )
         output = "plots/lss/overlapping/Abell_3651_3667.pdf"
         savefig(output, fig=fig, tight=False)
-        return
+        # return
 
     for i, cl in tqdm(enumerate(chances), total=chances.size):
         center = get_center(cl)
@@ -421,6 +421,9 @@ def plot_sky(
     #         fontsize=16,
     #         fontweight="heavy",
     #     )
+    bar = (5 * u.Mpc * cosmo.arcsec_per_kpc_comoving(cl["z"])).to(u.deg)
+    bar = ax.scalebar((0.1, 0.88), bar, lw=4, color="C1", capstyle="butt")
+    scalebar_label(bar, "5 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01)
     ax.grid(True)
     ax.set_xlabel("Right Ascension")
     ax.set_ylabel("Declination")
