@@ -4,9 +4,9 @@ import numpy as np
 
 def main(sample):
     if sample == "lowz":
-        date = "20240503"
+        date = "20240725"
     elif sample == "evolution":
-        date = "20240503"
+        date = "20240725"
     filename = f"catalogues/clusters_chances_{sample}_{date}_large.csv"
     cat = ascii.read(filename, format="csv", comment="#")
     n = cat["name"].size
