@@ -175,7 +175,7 @@ def main():
         area_total += area
         if cl["z"] < 0.1:
             area_lowz += area
-    print(area_total, area_lowz)
+    print(f"Total area: {area_total:.1f} sq. deg., {area_lowz:.1f} at z<0.1")
     # legend
     # ref = Circle((14*15, 40), 5, ec="k", fc="none", lw=1.5, transform=ax.get_transform("world"))
     # ax.add_patch(ref)
