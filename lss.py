@@ -158,7 +158,7 @@ def phase_space(
         fig, axes = plt.subplots(
             1,
             2,
-            figsize=(9, 6),
+            figsize=(9, 7),
             sharey=True,
             width_ratios=(4, 1.2),
             layout="constrained",
