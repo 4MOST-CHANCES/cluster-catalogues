@@ -13,6 +13,7 @@ from matplotlib.patches import Circle, Ellipse
 import multiprocessing as mp
 import numpy as np
 from time import time
+import sys
 
 import ligo.skymap.plot
 from ligo.skymap.plot.poly import subdivide_vertices
@@ -196,7 +197,6 @@ def plot_supercluster(
     alpha=0.8,
     dz=0.01,
     vmax=5000,
-    use_skymap=True,
 ):
     """barsize in Mpc"""
     if isinstance(cmap, str):
@@ -229,56 +229,34 @@ def plot_supercluster(
     print("z_rng = ", zmin, zmax, cat["z"][in_sc_z].min(), cat["z"][in_sc_z].max())
     print("in_sc:", in_sc.size, in_sc.sum(), (in_sc & in_sc_z).sum())
 
-    # ax = fig.add_subplot()  # projection=ccrs.Mollweide())
-    if use_skymap:
-        fig = plt.figure(figsize=(8, 8), constrained_layout=True)
-        plotradius = 10 if sc.name == "Shapley" else 15
-        print(sc.ra, sc.dec, plotradius, get_circle_center(sc.ra, sc.dec))
-        ax = plt.axes(
-            projection="astro zoom",
-            center=get_circle_center(sc.ra, sc.dec),
-            radius=f"{plotradius} deg",
-            # rotate="0 deg",
-        )
-    else:
-        aspect = np.abs((sc.xlim[1] - sc.xlim[0]) / (sc.ylim[1] - sc.ylim[0]))
-        fig = plt.figure(figsize=(8 * aspect, 8), constrained_layout=True)
-        ax = fig.add_subplot()  # projection=ccrs.Mollweide())
+    fig = plt.figure(figsize=(8, 8), constrained_layout=True)
+    plotradius = 10 if sc.name == "Shapley" else 15
+    print(sc.ra, sc.dec, plotradius, get_circle_center(sc.ra, sc.dec))
+    ax = plt.axes(
+        projection="astro zoom",
+        center=get_circle_center(sc.ra, sc.dec),
+        radius=f"{plotradius} deg",
+        # rotate="0 deg",
+    )
     ax.set_title(f"{sc.name} (z={sc.z:.3f})")
-    if use_skymap:
-        _ = [
-            ax.mark_inset_circle(
-                ax,
-                get_circle_center(ra, dec),
-                radius=get_circle_radius(d200),
-                # facecolor=cmap((vp - vmin) / (vmax - vmin)),
-                facecolor=cmap((z - zmin) / (zmax - zmin)),
-                lw=0,
-                alpha=0.5,
-            )
-            for ra, dec, d200, z, vp in zip(
-                cat["ra"][in_sc_z],
-                cat["dec"][in_sc_z],
-                cat["d200"][in_sc_z],
-                cat["z"][in_sc_z],
-                vpec[in_sc_z],
-            )
-        ]
-    else:
-        s = (cat["m200"]) / 1e12
-        im = ax.scatter(
-            cat["ra"],
-            cat["dec"],
-            c=cat["z"],
-            s=s,
-            marker="o",
-            cmap=cmap,
-            alpha=alpha,
-            vmin=sc.z - dz,
-            vmax=sc.z + dz,
-            transform=ax.get_transform("world"),
+    _ = [
+        ax.mark_inset_circle(
+            ax,
+            get_circle_center(ra, dec),
+            radius=get_circle_radius(d200),
+            # facecolor=cmap((vp - vmin) / (vmax - vmin)),
+            facecolor=cmap((z - zmin) / (zmax - zmin)),
+            lw=0,
+            alpha=0.5,
         )
-        ax.set(xlim=sc.xlim, ylim=sc.ylim, aspect="equal")
+        for ra, dec, d200, z, vp in zip(
+            cat["ra"][in_sc_z],
+            cat["dec"][in_sc_z],
+            cat["d200"][in_sc_z],
+            cat["z"][in_sc_z],
+            vpec[in_sc_z],
+        )
+    ]
     ax.set(xlabel="Right Ascension", ylabel="Declination")
 
     if sc.name == "Shapley":
@@ -313,31 +291,52 @@ def plot_supercluster(
             fontweight="bold",
         )
     if show_abell and hasattr(sc, "primary"):
+        # these selected by hand
         i = 0
-        sccat = cat[in_sc_extended & in_sc_z]
+        sccat = cat[in_sc & in_sc_z]
         sccat.sort("m200")
         sccat.reverse()
+        shown = []
+        ha_dict = dict(right=("A3164", "A3089", "AS442", "AS733"), center=("A3128",))
+        va_dict = dict(top=("A3111", "A3158", "A3225", "A3532"), center=("A3564",))
         for cl in sccat:
             if cl["name"] in special["name"]:  # or (cl["name"] not in sc.primary):
                 continue
             abell = Abell.query(
                 ra=np.array([cl["ra"]]),
                 dec=np.array([cl["dec"]]),
-                radius=10 * u.arcmin,
+                radius=20 * u.arcmin,
             )
             if abell["name"].size == 0:
                 continue
+            aname = abell["name"][0].replace("bell ", "")
+            if aname in shown:
+                continue
+            shown.append(aname)
+            coord = SkyCoord(ra=cl["ra"], dec=cl["dec"], unit="deg")
+            ax.plot_coord(coord, "kx", ms=6, zorder=1000)
+            # text alignment
+            ha = [key for key in ha_dict if aname in ha_dict.get(key)]
+            ha = ha[0] if len(ha) == 1 else "left"
+            va = [key for key in va_dict if aname in va_dict.get(key)]
+            va = va[0] if len(va) == 1 else "bottom"
+            if va == "center" and ha != "center":
+                dra = 10 * u.arcmin * (-1) ** (ha == "left")
+            else:
+                dra = 0 * u.arcmin
             ax.text_coord(
-                SkyCoord(ra=cl["ra"], dec=cl["dec"], unit="deg"),
-                abell["name"][0].replace("bell ", ""),
-                ha="left",
-                va="bottom",
+                coord.spherical_offsets_by(dra, 0 * u.arcmin),
+                aname,
+                ha=ha,
+                va=va,
                 color="k",
                 fontsize=14,
                 fontweight="bold",
             )
             i += 1
-            if i == 4:
+            if (sc.name == "Shapley" and i == 7) or (
+                sc.name == "Horologium-Reticulum" and i == 9
+            ):
                 break
     # if sc.name == "Horologium-Reticulum":
     # fornax = Circle((54.71135, -35.40093), 12.5, facecolor="none", edgecolor="0.5", lw=2)
@@ -370,30 +369,27 @@ def plot_supercluster(
     # ax.annotate(cl["name"], xy=(cl["ra"], cl["dec"]), ha="left", va="bottom", color="C3", fontsize=16)
     if show_primary:
         p = np.isin(cat["name"], sc.primary)
-        if use_skymap:
-            for cl in cat[p]:
-                # if cl["name"] in sc.primary:
-                #     ec = "k"
-                # elif cl["name"] in sc.secondary:
-                #     ec = "none"
-                ax.mark_inset_circle(
-                    ax,
-                    center=get_circle_center(cl["ra"], cl["dec"]),
-                    radius=get_circle_radius(cl["d200"]),
-                    fc="none",
-                    ec="k",
-                    lw=1,
-                )
-                ax.mark_inset_circle(
-                    ax,
-                    center=get_circle_center(cl["ra"], cl["dec"]),
-                    radius=get_circle_radius(5 * cl["d200"]),
-                    fc="none",
-                    ec="k",
-                    lw=1,
-                )
-        else:
-            ax.plot(cat["ra"][p], cat["dec"][p], "kx", ms=6, mew=3)
+        for cl in cat[p]:
+            # if cl["name"] in sc.primary:
+            #     ec = "k"
+            # elif cl["name"] in sc.secondary:
+            #     ec = "none"
+            ax.mark_inset_circle(
+                ax,
+                center=get_circle_center(cl["ra"], cl["dec"]),
+                radius=get_circle_radius(cl["d200"]),
+                fc="none",
+                ec="k",
+                lw=1,
+            )
+            ax.mark_inset_circle(
+                ax,
+                center=get_circle_center(cl["ra"], cl["dec"]),
+                radius=get_circle_radius(5 * cl["d200"]),
+                fc="none",
+                ec="k",
+                lw=1,
+            )
     if show_chances:
         chances_color = (0.5, 0, 0.5)
         mask = (
@@ -404,17 +400,15 @@ def plot_supercluster(
             # & (chances["z"])
             # & ~(sc.in_footprint(chances["ra"], chances["dec"]))
         )
-        # print(mask.size, mask.sum())
-        if use_skymap:
-            for cl in chances[mask]:
-                ax.mark_inset_circle(
-                    ax,
-                    get_circle_center(cl["ra"], cl["dec"]),
-                    get_circle_radius(5 * cl["d200"] / 60),
-                    fc="none",
-                    ec=chances_color,
-                    lw=0.5,
-                )
+        for cl in chances[mask]:
+            ax.mark_inset_circle(
+                ax,
+                get_circle_center(cl["ra"], cl["dec"]),
+                get_circle_radius(5 * cl["d200"] / 60),
+                fc="none",
+                ec=chances_color,
+                lw=0.5,
+            )
         for cl in chances[mask]:
             ax.text_coord(
                 SkyCoord(cl["ra"] + 0.02, cl["dec"] - 0.05, unit="deg"),
@@ -426,27 +420,19 @@ def plot_supercluster(
                 # transform=ax.transAxes,
             )
         kw = dict(color=chances_color, ms=12, mew=3)
-        if use_skymap:
-            kw["transform"] = ax.get_transform("world")
+        kw["transform"] = ax.get_transform("world")
         ax.plot(chances[mask]["ra"], chances[mask]["dec"], "+", **kw)
-    if use_skymap:
-        xy = subdivide_vertices(sc.footprint[0], 100)
-        # print(xy, len(xy))
-        ax.plot(
-            # *np.transpose(sc.footprint[0]),
-            *np.transpose(xy),
-            "k-",
-            transform=ax.get_transform("world"),
-            lw=3,
-        )
-    else:
-        sc.plot(
-            ax=ax,
-            facecolor="none",
-            edgecolor="k",
-            lw=3,
-            transform=ax.get_transform("world"),
-        )
+    xy = subdivide_vertices(sc.footprint[0], 100)
+    # print(xy, len(xy))
+    ax.plot(
+        # *np.transpose(sc.footprint[0]),
+        *np.transpose(xy),
+        "-",
+        color=(0.2, 0.7, 0),
+        lw=4,
+        zorder=-100,
+        transform=ax.get_transform("world"),
+    )
     # b = (barsize * cosmo.arcsec_per_kpc_comoving(sc.z)).to(u.deg).value
     # xb = sc.xlim[0] + 0.1 * (sc.xlim[1] - sc.xlim[0])
     # yb = sc.ylim[0] + 0.1 * (sc.ylim[1] - sc.ylim[0])
@@ -461,7 +447,7 @@ def plot_supercluster(
     # )
     b = (barsize * cosmo.arcsec_per_kpc_comoving(sc.z)).to(u.deg)
     bar = ax.scalebar(
-        (0.84 - 0.1 * (sc.name == "Shapley"), 0.12),
+        (0.84 - 0.05 * (sc.name == "Shapley"), 0.12),
         b,
         color="C1",
         lw=4,
@@ -475,15 +461,7 @@ def plot_supercluster(
         fontweight="bold",
         pad=0.01,
     )
-    # ax.invert_xaxis()
-    if use_skymap:
-        ax.grid(True)
-    else:
-        ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
-        ax.yaxis.set_major_locator(ticker.MultipleLocator(5))
-        ax.xaxis.set_minor_locator(ticker.NullLocator())
-        ax.yaxis.set_minor_locator(ticker.NullLocator())
-    print(ax.get_xlim(), ax.get_ylim())
+    ax.grid(True)
     name = sc.name.split("-")[0].lower()
     output = f"plots/superclusters/eromapper_sc_{name}"
     for ext in ("pdf", "png"):
@@ -578,6 +556,20 @@ def load_eromapper():
     cat.catalog["r200"].format = ".2f"
     cat.catalog["d200"].format = ".4f"
     print(f"Loaded eromapper in {time()-ti:.1f} s")
+    # look for A3571
+    j = Abell.obj == "A3571"
+    print(Abell[j])
+    q = cat.query(
+        ra=Abell.ra[j], dec=Abell.dec[j], radius=30 * u.arcmin, z=0.1, z_width=0.1
+    )
+    q = q[q["z"] < 0.2]
+    q["arcmin"] = (
+        Abell.coords[j]
+        .separation(SkyCoord(ra=q["ra"], dec=q["dec"], unit="deg"))
+        .to("arcmin")
+    )
+    q.sort("arcmin")
+    print(q)
     return cat
 
 
