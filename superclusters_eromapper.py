@@ -297,8 +297,14 @@ def plot_supercluster(
         sccat.sort("m200")
         sccat.reverse()
         shown = []
-        ha_dict = dict(right=("A3164", "A3089", "AS442", "AS733"), center=("A3128",))
-        va_dict = dict(top=("A3111", "A3158", "A3225", "A3532"), center=("A3564",))
+        ha_dict = dict(
+            right=("A3089", "A3110", "A3164", "A3535", "AS442", "AS733"),
+            center=("A3128", "AS726"),
+        )
+        va_dict = dict(
+            top=("A3111", "A3158", "A3225", "A3532", "AS726"),
+            center=("A3110", "A3528", "A3530", "A3535", "A3564"),
+        )
         for cl in sccat:
             if cl["name"] in special["name"]:  # or (cl["name"] not in sc.primary):
                 continue
@@ -307,6 +313,7 @@ def plot_supercluster(
                 dec=np.array([cl["dec"]]),
                 radius=20 * u.arcmin,
             )
+            print(abell)
             if abell["name"].size == 0:
                 continue
             aname = abell["name"][0].replace("bell ", "")
@@ -321,11 +328,15 @@ def plot_supercluster(
             va = [key for key in va_dict if aname in va_dict.get(key)]
             va = va[0] if len(va) == 1 else "bottom"
             if va == "center" and ha != "center":
-                dra = 10 * u.arcmin * (-1) ** (ha == "left")
+                dra = 20 * u.arcmin * (-1) ** (ha == "left")
             else:
                 dra = 0 * u.arcmin
+            if va == "top" and ha == "center":
+                ddec = -20 * u.arcmin
+            else:
+                ddec = 0 * u.arcmin
             ax.text_coord(
-                coord.spherical_offsets_by(dra, 0 * u.arcmin),
+                coord.spherical_offsets_by(dra, ddec),
                 aname,
                 ha=ha,
                 va=va,
@@ -452,6 +463,7 @@ def plot_supercluster(
         color="C1",
         lw=4,
         capstyle="butt",
+        zorder=100,
     )
     scalebar_label(
         bar,
