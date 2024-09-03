@@ -29,6 +29,7 @@ from plottery.plotutils import savefig, update_rcParams
 from profiley.helpers.spherical import radius_from_mass
 
 from astro.clusters import ClusterCatalog
+from astro.footprint import Footprint
 
 from tools import scalebar_label
 
@@ -56,8 +57,10 @@ def main():
     print(cat)
     if args.sample == "all":
         infall_mass_function(args, chances, cat, plottype="hist")
-        phase_space(args, chances, cat, yaxis="sigma")
-        phase_space(args, chances, cat, yaxis="km/s")
+        infall_mass_function(args, chances, cat, plottype="hist", sigma_clip=3)
+        infall_mass_function(args, chances, cat, plottype="points", sigma_clip=3)
+        # phase_space(args, chances, cat, yaxis="sigma")
+        # phase_space(args, chances, cat, yaxis="km/s")
     else:
         wrap_plot_sky(args, chances, cat, show_neighbors=False)
         wrap_plot_sky(args, chances, cat, show_neighbors=True, suffix="neighbors")
@@ -65,13 +68,18 @@ def main():
     # print(chances)
 
 
-def infall_mass_function(args, chances, cat, hide_main=True, plottype="kde"):
+def infall_mass_function(
+    args, chances, cat, hide_main=True, plottype="kde", sigma_clip=0
+):
     z_main = np.array([chances["z"][chances["name"] == cl][0] for cl in cat["chances"]])
     m_main = 1e14 * np.array(
         [chances["m200"][chances["name"] == cl][0] for cl in cat["chances"]]
     )
+    sigma_main = np.array(
+        [chances["sigma"][chances["name"] == cl] for cl in cat["chances"]]
+    )[:, 0]
     fig, ax = plt.subplots(layout="constrained")
-    logmubins = np.arange(-3, 0.5, 0.2)
+    logmubins = np.arange(-2.6, 0.4, 0.2)
     mubins = 10**logmubins
     mu = cat["m200"] / m_main
     # kde = gaussian_kde(np.log10(cat["m200"] / m_main), bw_method=0.1)
@@ -84,24 +92,57 @@ def infall_mass_function(args, chances, cat, hide_main=True, plottype="kde"):
     masks = [mask, mask & (z_main <= 0.07), mask & (z_main > 0.07)]
     labels = ["All", "Low-z", "Evolution"]
     colors = ["k", "C0", "C3"]
+    markers = ["^", "s", "o"]
     masks_main = [chances["z"] < 1, chances["z"] <= 0.07, chances["z"] > 0.07]
-    if plottype == "hist":
-        for mask, label, c, m in zip(masks, labels, colors, masks_main):
-            n = np.histogram(mu[mask], mubins)[0]
-            if label == "All" or True:
-                kw = dict(histtype="step")
-            else:
-                kw = dict(histtype="stepfilled", alpha=0.5)
+    if plottype in ("hist", "points"):
+        for i, (mask, label, c, m) in enumerate(zip(masks, labels, colors, masks_main)):
+            if sigma_clip:
+                vcut = np.abs(cat["vpec (km/s)"]) < sigma_clip * sigma_main
+                mask = mask & vcut
+            # normalized by the number of CHANCES clusters
+            N = np.histogram(mu[mask], mubins)[0]
+            n = N / m.sum()
             # draw a normalized histogram of data that have already been binned
-            ax.hist(
-                mubins[:-1],
-                mubins,
-                weights=n / m.sum(),
-                color=c,
-                label=label,
-                lw=2,
-                **kw,
-            )
+            if plottype == "hist" or label == "All":
+                ax.hist(
+                    mubins[:-1],
+                    mubins,
+                    histtype="step",
+                    weights=n,
+                    ls="-",
+                    lw=2,
+                    color=c,
+                )
+                ax.plot([], [], ls="-", lw=3, color=c, label=label)
+            else:
+                nerr = N**0.5 / m.sum()
+                nerr = n * (1 / N + 1 / m.sum()) ** 0.5
+                uplims = N == 0
+                n[uplims] = 1 / m.sum()
+                nerr[uplims] = n[uplims] - 0.009
+                print(label, nerr, uplims)
+                xmu = 10 ** ((logmubins[:-1] + logmubins[1:]) / 2)
+                xmu = xmu * (1 + 0.03 * (-1) ** i)
+                ax.errorbar(
+                    xmu[~uplims],
+                    n[~uplims],
+                    nerr[~uplims],
+                    color=c,
+                    fmt=markers[i],
+                    ms=5 + i,
+                    mew=2,
+                    label=label,
+                )
+                if uplims.sum():
+                    ax.errorbar(
+                        xmu[uplims],
+                        n[uplims],
+                        nerr[uplims],
+                        color=c,
+                        fmt=",",
+                        mew=2,
+                        uplims=True,
+                    )
     elif plottype == "smooth":
         logmu = (logmubins[:-1] + logmubins[1:]) / 2
         n = CubicSpline(logmu, np.histogram(mu[mask], bins=mubins)[0])
@@ -112,7 +153,6 @@ def infall_mass_function(args, chances, cat, hide_main=True, plottype="kde"):
             logmu, np.histogram(mu[mask & (z_main > 0.07)], bins=mubins)[0]
         )
         x = np.logspace(logmu[0], logmu[-1], 1000)
-        print(x)
         ax.plot(x, n(np.log(x)), "k-", label="All")
         ax.plot(x, nlo(np.log(x)), "C0", label="Low-z")
         ax.plot(x, nev(np.log(x)), "C3", label="Evolution")
@@ -124,7 +164,7 @@ def infall_mass_function(args, chances, cat, hide_main=True, plottype="kde"):
     # opaque borders for both histograms
     # ax.hist(mu[mask & (z_main <= 0.07)], mubins, color="C0", lw=0.5, histtype="step")
     # ax.hist(mu[mask & (z_main > 0.07)], mubins, color="C3", lw=0.5, histtype="step")
-    ax.legend(fontsize=14)
+    ax.legend(fontsize=12)
     ax.set(
         xlabel="$\mu\equiv M_{200}^\mathrm{infalling}/M_{200}^\mathrm{main}$",
         ylabel="$N(\mu)d\mu$ per main cluster",
@@ -132,11 +172,15 @@ def infall_mass_function(args, chances, cat, hide_main=True, plottype="kde"):
         yscale="log",
     )
     ax.set_xlim(2e-3, 2)
+    if plottype == "points":
+        ax.set_ylim(0.007, 4)
     ax.set_xticks(np.logspace(-2, 0, 3), ["0.01", "0.1", "1"])
     ax.set_yticks(np.logspace(-2, 0, 3), ["0.01", "0.1", "1"])
     # ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%d"))
-    output = "plots/lss/infall_mass_function.pdf"
-    savefig(output, fig=fig, tight=False)
+    output = "plots/lss/infall_mass_function"
+    if sigma_clip:
+        output = f"{output}_{plottype}_{sigma_clip}vclip"
+    savefig(f"{output}.pdf", fig=fig, tight=False)
 
 
 def phase_space(
@@ -292,60 +336,9 @@ def wrap_plot_sky(
 
     # overlapping clusters are handled individually
     if args.sample == "lowz":
-        # annotate
-        # fig = plt.figure(figsize=(7, 6), constrained_layout=True
-        fig, ax = plot_sky(
-            args,
-            chances,
-            chances[chances["name"] == "Abell 3651"][0],
-            cat,
-            "301.5d -56.3d",
-            "4 deg",
-            cmap,
-            # fig=fig,
-            z0=0.056,
-            annotate=False,
-            show_neighbors=True,
-            hide_coordinates=False,
-            save=False,
-        )
-        ax.annotate(
-            "Abell 3667 (z=0.053)",
-            xy=(0.05, 0.05),
-            xycoords="axes fraction",
-            ha="left",
-            va="bottom",
-            fontsize=16,
-        )
-        ax.annotate(
-            "Abell 3651 (z=0.060)",
-            xy=(0.95, 0.9),
-            xycoords="axes fraction",
-            ha="right",
-            va="top",
-            fontsize=16,
-        )
-        bar = (5 * u.Mpc * cosmo.arcsec_per_kpc_comoving(0.056)).to(u.deg)
-        bar = ax.scalebar((0.75, 0.08), bar, lw=4, color="C1", capstyle="butt")
-        scalebar_label(
-            bar, "5 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01
-        )
-        # ax.plot_coord(
-        #     SkyCoord(ra=[295, 295 + bar], dec=[-59.3, -59.3], unit="deg"),
-        #     "-",
-        #     color="k",
-        #     lw=3,
-        # )
-        # ax.text_coord(
-        #     SkyCoord(ra=295 + bar / 2, dec=-59, unit="deg"),
-        #     "5 Mpc",
-        #     ha="center",
-        #     va="bottom",
-        #     fontsize=16,
-        # )
-        output = "plots/lss/overlapping/Abell_3651_3667.pdf"
-        savefig(output, fig=fig, tight=False)
-        # return
+        plot_sky_a119_a147_a168(args, chances, cat, cmap)
+        plot_sky_a3651_a3667(args, chances, cat, cmap)
+        return
 
     for i, cl in tqdm(enumerate(chances), total=chances.size):
         center = get_center(cl)
@@ -374,6 +367,144 @@ def wrap_plot_sky(
     return
 
 
+def plot_sky_a119_a147_a168(args, chances, cat, cmap):
+    fig, ax = plot_sky(
+        args,
+        chances,
+        chances[chances["name"] == "Abell 0119"][0],
+        cat,
+        "17d 0d",
+        "6 deg",
+        cmap,
+        z0=0.044,
+        annotate=False,
+        show_neighbors=True,
+        hide_coordinates=False,
+        sigma_clip=False,
+        save=False,
+    )
+    # ax.text_coord("Abell 168", xy=())
+    bar = (10 * u.Mpc * cosmo.arcsec_per_kpc_comoving(0.056)).to(u.deg)
+    bar = ax.scalebar((0.1, 0.9), bar, lw=4, color="C1", capstyle="butt")
+    scalebar_label(bar, "10 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01)
+    output = "plots/lss/overlapping/overlapping_A119_A147_A1168.pdf"
+    savefig(output, fig=fig, tight=False)
+    return
+
+
+def plot_sky_a3651_a3667(args, chances, cat, cmap):
+    fig, ax = plot_sky(
+        args,
+        chances,
+        chances[chances["name"] == "Abell 3651"][0],
+        cat,
+        "301.5d -56.3d",
+        "4 deg",
+        cmap,
+        z0=0.056,
+        annotate=False,
+        show_neighbors=True,
+        hide_coordinates=False,
+        sigma_clip=False,
+        save=False,
+    )
+    # Dietl et al.
+    contourfile = (
+        "aux/xray/erosita/contours_a3667/A3667_Dietl_filament_contours_filtered.ctr"
+    )
+    if os.path.isfile(contourfile):
+        # choose a few levels to show
+        show_levels = np.array([0, 3, 6, 8])
+        show_levels = show_levels[:1]
+        with open(contourfile) as cf:
+            contours = []
+            levels = []
+            start = False
+            for line in cf:
+                line = line.strip()
+                if line.startswith("level"):
+                    level = float(line.split("=")[1])
+                    levels.append(level)
+                if line == "(":
+                    start = True
+                    contours.append([])
+                elif line == ")":
+                    start = False
+                    i = len(levels) - 1
+                    c = np.array(contours[-1], dtype=float)
+                    # color = f"C{len(levels)}"
+                    color = "C2"
+                    if i in show_levels:
+                        if (
+                            i == 0 and ((max(c[:, 0]) > 303) and (min(c[:, 0]) < 298))
+                        ) or i > 0:
+                            ax.plot_coord(
+                                SkyCoord(
+                                    ra=c[:, 0],
+                                    dec=c[:, 1],
+                                    unit="deg",
+                                ),
+                                color=color,
+                                lw=1.2,
+                                zorder=1010,
+                            )
+                            if i == 0:
+                                bridge = Footprint("bridge", footprint=c)
+                elif start:
+                    contours[-1].append(line.split())
+    print(bridge)
+    #     for i, level in enumerate(levels):
+    #         ax.plot([], [], label=str(level), color=f"C{i}")
+    # Alexis' contours
+    contourfiles = glob("aux/xray/erosita/contours_a3667/cl*.seg")
+    for i, contourfile in enumerate(contourfiles):
+        seg = Table.read(contourfile, format="ascii.commented_header")
+        # for contour in np.unique(seg["col5"]):
+        #     j = seg["col5"] == contour
+        #     ax.plot_coord(
+        #         SkyCoord(ra=seg["col1"][j], dec=seg["col2"][j], unit="deg"),
+        #         f"C{i+4}-",
+        #         lw=1,
+        #         zorder=1010,
+        #     )
+        for s in seg:
+            ax.plot_coord(
+                SkyCoord(
+                    ra=[s["col1"], s["col3"]], dec=[s["col2"], s["col4"]], unit="deg"
+                ),
+                f"C{2*i}-",
+                lw=2,
+                zorder=1000,
+            )
+    # ax.legend(fontsize=12)
+    levels = np.array(levels)
+    print(len(contours))
+    print(levels)
+    print(levels[show_levels])
+    ax.annotate(
+        "Abell 3667 (z=0.053)",
+        xy=(0.05, 0.05),
+        xycoords="axes fraction",
+        ha="left",
+        va="bottom",
+        fontsize=16,
+    )
+    ax.annotate(
+        "Abell 3651 (z=0.060)",
+        xy=(0.95, 0.9),
+        xycoords="axes fraction",
+        ha="right",
+        va="top",
+        fontsize=16,
+    )
+    bar = (5 * u.Mpc * cosmo.arcsec_per_kpc_comoving(0.056)).to(u.deg)
+    bar = ax.scalebar((0.75, 0.08), bar, lw=4, color="C1", capstyle="butt", zorder=100)
+    scalebar_label(bar, "5 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01)
+    output = "plots/lss/overlapping/overlapping_A3651_A3667.pdf"
+    savefig(output, fig=fig, tight=False)
+    return
+
+
 def plot_sky(
     args,
     chances,
@@ -389,6 +520,7 @@ def plot_sky(
     show_main=True,
     show_neighbors=False,
     hide_coordinates=True,
+    sigma_clip=True,
     suffix="",
     save=True,
 ):
@@ -400,8 +532,8 @@ def plot_sky(
     if fig is None:
         fig = plt.figure(figsize=(6, 6), constrained_layout=True)
     ax = plt.axes(projection="astro zoom", center=center, radius=radius)
-    ax.mark_inset_circle(ax, get_center(cl), get_radius(cl, 1), lw=0.8, zorder=10)
-    ax.mark_inset_circle(ax, get_center(cl), get_radius(cl, 5), zorder=10)
+    ax.mark_inset_circle(ax, get_center(cl), get_radius(cl, 1), lw=0.8, zorder=1000)
+    ax.mark_inset_circle(ax, get_center(cl), get_radius(cl, 5))
     if show_neighbors:
         cldist = cl["coord"].separation(chances["coord"])
         neighbors = (cldist < 5 * (cl["d200"] + chances["d200"]) * u.arcmin) & (
@@ -420,7 +552,7 @@ def plot_sky(
                 transform=ax.get_transform("world"),
                 mew=2,
                 ms=8,
-                zorder=11,
+                zorder=1001,
             )
             if annotate:
                 ax.text_coord(
@@ -444,7 +576,7 @@ def plot_sky(
         color = list(cmap(dvc))
         # add transparency - doing it this way to also have transparency in the edge color
         color[-1] = 0.7
-        if np.abs(dv) < 3 * cl["sigma"]:
+        if (np.abs(dv) < 3 * cl["sigma"]) or not sigma_clip:
             kwds = dict(lw=0, facecolor=color, edgecolor=color, zorder=9 + i)
         else:
             # to somewhat account for the thicker edge
@@ -499,9 +631,12 @@ def plot_sky(
     #         fontsize=16,
     #         fontweight="heavy",
     #     )
-    bar = (5 * u.Mpc * cosmo.arcsec_per_kpc_comoving(cl["z"])).to(u.deg)
-    bar = ax.scalebar((0.1, 0.88), bar, lw=4, color="C1", capstyle="butt")
-    scalebar_label(bar, "5 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01)
+    if annotate:
+        bar = (5 * u.Mpc * cosmo.arcsec_per_kpc_comoving(cl["z"])).to(u.deg)
+        bar = ax.scalebar((0.1, 0.88), bar, lw=4, color="C1", capstyle="butt")
+        scalebar_label(
+            bar, "5 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01
+        )
     ax.grid(True)
     ax.set_xlabel("Right Ascension")
     ax.set_ylabel("Declination")
@@ -635,6 +770,13 @@ def find_subclusters(
     matches["vpec (km/s)"].format = ".0f"
     print(matches)
     print(matches[matches[lambdacol] - matches[f"{lambdacol}_e"] >= 5])
+    # main cluster statistics
+    chances.catalog.sort("z")
+    with_main = np.isin(chances["name"], matches["chances"][matches["is_main"] == 1])
+    print(f"{with_main.sum()}/{chances.obj.size} main clusters identified")
+    print(chances[with_main])
+    print(chances[~with_main])
+    chances.catalog.sort("name")
     matches.write(output, format="ascii.fixed_width", overwrite=True)
     return chances, matches
 
