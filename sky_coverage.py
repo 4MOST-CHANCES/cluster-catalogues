@@ -65,7 +65,7 @@ def main():
     print(sample)
     sample["coord"] = SkyCoord(ra=sample["ra"], dec=sample["dec"], unit="deg")
 
-    l = np.linspace(-179.99, 179.99, 200)
+    l = np.linspace(-179.999, 179.999, 1000)
     b = np.ones(l.size)
     ra = np.linspace(0, 360, b.size)
     galaxy = [
@@ -100,10 +100,10 @@ def main():
         j = [i for i, x in enumerate(radec.ra.deg) if x > 15 * (axcenter + 12)][0]
         g = np.roll(g, -j)
         ax.plot_coord(g, color="0.8", zorder=-2, alpha=0.5, lw=2)
-    # also show SO-LAT and CCAT wide surveys
-    txt = ax.text_coord(
+    # SO/CCAT
+    ax.text_coord(
         SkyCoord(ra=3.2 * 15, dec=10, unit="deg"),
-        "SO-LAT / CCAT-WFS / LSST",
+        "SO-LAT / CCAT-WFS",
         color="k",
         ha="left",
         va="bottom",
@@ -111,13 +111,25 @@ def main():
         fontweight="bold",
         bbox=dict(facecolor="w", alpha=0.5, linewidth=0),
     )
-    ax.plot_coord(
-        SkyCoord(ra=ra, dec=-19 * b, unit="deg"),
-        lw=210,
-        color="C1",
-        alpha=0.3,
-        zorder=-1,
+    vertices = subdivide_vertices(
+        np.array([[-90, -60], [269.999, -60], [269.999, 18], [-90, 18]]), 100
     )
+    ax.fill(*vertices.T, "C1", alpha=0.2, transform=ax.get_transform("world"))
+    # LSST: -60° < dec < +2°
+    ax.text_coord(
+        SkyCoord(ra=23.5 * 15, dec=-22, unit="deg"),
+        "LSST",
+        color="k",
+        ha="left",
+        va="bottom",
+        fontsize=14,
+        fontweight="bold",
+        bbox=dict(facecolor="w", alpha=0.5, linewidth=0),
+    )
+    vertices = subdivide_vertices(
+        np.array([[-90, -60], [269.999, -60], [269.999, 2], [-90, 2]]), 100
+    )
+    ax.fill(*vertices.T, "C1", alpha=0.2, transform=ax.get_transform("world"))
     # eROSITA-DE
     kwargs_erosita = dict(color="C3", lw=3)
     ell = SkyCoord(180, np.linspace(-90, 90, 181), unit="deg", frame="galactic")
@@ -137,6 +149,7 @@ def main():
         rotation=32,
         fontweight="bold",
     )
+
     # superclusters
     for sc in (shapley, horologium):
         xy = subdivide_vertices(sc.footprint[0], 100)
