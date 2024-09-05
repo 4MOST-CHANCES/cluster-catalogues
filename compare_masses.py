@@ -419,8 +419,17 @@ def fit_and_plot(
         ax.plot(x[xcol][xmask], y[ycol][ymask], "o", color="k")
     else:
         ax.errorbar(
-            x[xcol][xmask], y[ycol][ymask], y[yerrcol][ymask], fmt="o", color="k"
+            x[xcol][xmask],
+            y[ycol][ymask],
+            y[yerrcol][ymask],
+            fmt=".",
+            color="k",
+            mew=0,
+            elinewidth=1,
+            alpha=0.4,
+            zorder=10,
         )
+        ax.plot(x[xcol][xmask], y[ycol][ymask], "o", color="k", ms=2, zorder=10)
     # need redshifts
     # ax.scatter(x[xcol][xmask], y[ycol][ymask], c=x[], zorder=10)
     if xlabel == "AXES-2MRS" and ylabel == "PSZ2":
@@ -431,7 +440,8 @@ def fit_and_plot(
             10 ** line(xrng, *norm2),
             "C1-",
             lw=3,
-            zorder=10,
+            zorder=100,
+            alpha=0.7,
             label=f"y = {10**norm2[0]:.2f}x",
         )
         ax.plot(
@@ -443,14 +453,17 @@ def fit_and_plot(
             10 ** line(xrng, *fit_norm),
             "C1-",
             lw=3,
-            zorder=10,
+            zorder=100,
+            alpha=0.7,
             label=f"y = {10**fit_norm[0]:.2f}x",
         )
     if xlabel == "MCXC" and ylabel == "ACT-DR5":
         mask = y[ycol][ymask] > 10 * x[xcol][xmask]
         print(x["name", "OName", "AName", "z", "m200"][xmask][mask])
         print(y["name", "SNR", "z", "M500cCal", "m200"][ymask][mask])
-    ax.plot(10**xrng, 10**xrng, "-", color="0.5", lw=2, zorder=10, label="y = x")
+    ax.plot(
+        10**xrng, 10**xrng, "-", color="C0", lw=2, alpha=0.7, zorder=99, label="y = x"
+    )
     ax.legend(loc="upper left", fontsize=15)
     xsub = xcol[1:].replace("_", ",")
     ysub = ycol[1:].replace("_", ",")
