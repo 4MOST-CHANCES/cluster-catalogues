@@ -59,8 +59,8 @@ def main():
         infall_mass_function(args, chances, cat, plottype="hist")
         infall_mass_function(args, chances, cat, plottype="hist", sigma_clip=3)
         infall_mass_function(args, chances, cat, plottype="points", sigma_clip=3)
-        # phase_space(args, chances, cat, yaxis="sigma")
-        # phase_space(args, chances, cat, yaxis="km/s")
+        phase_space(args, chances, cat, yaxis="sigma")
+        phase_space(args, chances, cat, yaxis="km/s")
     else:
         wrap_plot_sky(args, chances, cat, show_neighbors=False)
         wrap_plot_sky(args, chances, cat, show_neighbors=True, suffix="neighbors")
@@ -198,6 +198,9 @@ def phase_space(
     r200_main = np.array(
         [chances["r200"][chances["name"] == cl] for cl in cat["chances"]]
     )[:, 0]
+    m200_main = np.array(
+        [chances["m200"][chances["name"] == cl] for cl in cat["chances"]]
+    )[:, 0]
     if show_histogram:
         fig, axes = plt.subplots(
             1,
@@ -235,6 +238,19 @@ def phase_space(
         c=z_main[mask],
         alpha=0.5,
     )
+    # escape velocities
+    i = np.argmin(np.abs(m200_main - 10))
+    nfw = NFW(1e14 * m200_main[i], 5, z_main[i], overdensity=200)
+    r = np.linspace(0, 6, 1000)
+    q = nfw.cosmo.Om0 / 2 - nfw.cosmo.Ode0
+    # print(nfw.mass)
+    # r_eq = ((c.G * nfw.mass * u.Msun / q * cosmo.H(nfw.z) ** 2) ** (1 / 3)).to(u.Mpc)
+    # print(r_eq)
+    vesc = nfw.escape_velocity(r * r200_main[i], log_rmax=np.log10(r_eq))
+    print(i, 1e14 * m200_main[i], z_main[i])
+    print(np.squeeze(vesc), sigma_main[i])
+    ax.plot(r, vesc / sigma_main[i], "k-", lw=1.5)
+    ax.plot(r, -vesc / sigma_main[i], "k-", lw=1.5)
     # use this to find the size that gives a radius of 1 in data units
     # ax.scatter(1, -3, s=34000, c="k")
     # ax.grid()
