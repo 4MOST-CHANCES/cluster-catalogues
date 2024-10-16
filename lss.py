@@ -18,7 +18,11 @@ import numpy as np
 import os
 from scipy.interpolate import CubicSpline
 from scipy.ndimage import gaussian_filter
-from scipy.stats import gaussian_kde
+from scipy.stats import (
+    binned_statistic as binstat,
+    binned_statistic_2d as binstat2d,
+    gaussian_kde,
+)
 import seaborn as sns
 from time import time
 from tqdm import tqdm
@@ -53,7 +57,6 @@ def main():
     chances.catalog["sigma"].format = "%.0f"
     chances, cat = find_subclusters(args, chances)
     print(chances)
-    cat = add_r200(cat)
     print(cat)
     if args.sample == "all":
         infall_mass_function(args, chances, cat, plottype="hist")
@@ -321,13 +324,13 @@ def add_r200(cat):
     m200, r200, c200 = np.transpose(m200)
     m200 = m200 / cosmo.h
     r200 = r200 / (1000 * cosmo.h)
-    d200 = ((r200 * u.Mpc) * cosmo.arcsec_per_kpc_proper(z)).to(u.deg).value
+    d200 = ((r200 * u.Mpc) * cosmo.arcsec_per_kpc_proper(z)).to(u.arcmin).value
     cat["m200"] = m200
     cat["r200"] = r200
     cat["d200"] = d200
     cat["m200"].format = ".2e"
     cat["r200"].format = ".2f"
-    cat["d200"].format = ".4f"
+    cat["d200"].format = ".2f"
     return cat
 
 
@@ -352,6 +355,7 @@ def wrap_plot_sky(
 
     # overlapping clusters are handled individually
     if args.sample == "lowz":
+        plot_sky_hydra_antlia(args, chances, cat, cmap)
         plot_sky_a119_a147_a168(args, chances, cat, cmap)
         plot_sky_a3651_a3667(args, chances, cat, cmap)
         return
@@ -380,6 +384,47 @@ def wrap_plot_sky(
     output = "plots/lss/lss_colorbar"
     for ext in ("pdf", "png"):
         savefig(f"{output}.{ext}", fig=fig, tight=False)
+    return
+
+
+def plot_sky_hydra_antlia(args, chances, cat, cmap):
+    fig, ax = plot_sky(
+        args,
+        chances,
+        chances[chances["name"] == "Hydra (A1060)"][0],
+        cat,
+        "158d -31d",
+        "12 deg",
+        cmap,
+        z0=0.012,
+        annotate=False,
+        show_neighbors=True,
+        hide_coordinates=False,
+        sigma_clip=False,
+        save=False,
+    )
+    # ax.text_coord("Abell 168", xy=())
+    bar = (5 * u.Mpc * cosmo.arcsec_per_kpc_comoving(0.012)).to(u.deg)
+    bar = ax.scalebar((0.7, 0.08), bar, lw=4, color="C1", capstyle="butt")
+    scalebar_label(bar, "5 cMpc", fontsize=13, color="C1", fontweight="bold", pad=0.01)
+    ax.annotate(
+        "Hydra",
+        xy=(0.75, 0.75),
+        xycoords="axes fraction",
+        ha="left",
+        va="bottom",
+        fontsize=16,
+    )
+    ax.annotate(
+        "Antlia",
+        xy=(0.35, 0.1),
+        xycoords="axes fraction",
+        ha="right",
+        va="center",
+        fontsize=16,
+    )
+    output = "plots/lss/overlapping/overlapping_Hydra_Antlia.pdf"
+    savefig(output, fig=fig, tight=False)
     return
 
 
@@ -586,7 +631,8 @@ def plot_sky(
     if z0 is None:
         z0 = cl["z"]
     for i, scl in enumerate(subcl):
-        radius = scl["d200"]
+        # remember we're storing this in arcmin
+        radius = scl["d200"] / 60
         dv = light * (scl["best_z"] - z0) / (1 + z0)
         dvc = (dv + vmax) / (2 * vmax)
         color = list(cmap(dvc))
@@ -709,6 +755,24 @@ def find_subclusters(
     )
     cat.catalog = cat[cat["z"] > 0.001]
     print(f"Loaded eromapper in {time()-ti:.1f} s")
+    # photoz uncertaintes
+    zbins = np.arange(0, 0.51, 0.02)
+    lambins = np.logspace(0.3, 2.3, 15)
+    zerr = binstat2d(
+        cat[lambdacol],
+        cat["z"],
+        cat["best_zerr"],
+        statistic="median",
+        bins=(lambins, zbins),
+    ).statistic
+    print(zerr.shape)
+    zerr = zerr / ((zbins[:-1] + zbins[1:]) / 2)
+    fig, ax = plt.subplots()
+    im = ax.pcolormesh(zbins, lambins, zerr, cmap="Reds")
+    ax.set(yscale="log", xlabel="Redshift", ylabel="$\lambda$")
+    plt.colorbar(im, ax=ax, label="$\Delta z_\mathrm{cl}/z_\mathrm{cl}$")
+    output = "plots/redmapper_zerr.png"
+    savefig(output, fig=fig)
     # eromapper.catalog.rename_column("name", "index")
     cat.catalog["name"] = np.arange(cat.size, dtype=int)
     # match_name = np.chararray(eromapper.size, itemsize=100)
@@ -773,6 +837,7 @@ def find_subclusters(
         chances.catalog[f"N_{args.catalog}"][i] = close.sum()
     matches = Table(matches)
     matches.rename_column("z", "best_z")
+    matches = add_r200(matches)
     matches.sort(["chances", "dist (arcmin)"])
     for col in ("ra", "dec"):
         matches[col].format = ".5f"

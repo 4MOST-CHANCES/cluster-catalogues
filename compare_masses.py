@@ -67,6 +67,7 @@ def main():
     if act[merrcol_act].max() < 1000:
         act.catalog[merrcol_act] = 1e14 * act[merrcol_act]
     codex = load_codex()
+    locuss = load_locuss()
     meneacs = load_meneacs()
     wings = load_wings()
     axes2mrs = Table(
@@ -163,7 +164,10 @@ def main():
         psz, axes2mrs, radius=max_radius
     )
     print(f"{psz_in_axes2mrs.sum()}/{psz_in_axes2mrs.size} PSZ-AXES2MRS matches")
+    meneacs_locuss_closest, meneacs_in_locuss = match_catalogs(meneacs, locuss, radius=max_radius)
+    print(f"{meneacs_in_locuss.sum()}/{meneacs_in_locuss.size} MENeaCS/LoCuSS matches")
 
+    fit_and_plot("LoCuSS", "MENeaCS", locuss, meneacs, )
     fit_and_plot(
         "CODEX",
         "eRASS1",
@@ -549,6 +553,19 @@ def load_codex():
     codex.rename_column("z_lambda", "z")
     return codex
 
+def load_locuss():
+    filename = "aux/lensing/locuss/locuss-tab-mass-corr.csv"
+    locuss = ascii.read(filename, format="csv")
+    locuss["name"] = [
+        name.replace("ABELL", "Abell ").replace("RXC", "RXC ")
+        for name in locuss["name"]
+    ]
+    print(np.sort(locuss.colnames))
+    locuss = ClusterCatalog("LoCuSS", locuss, base_cols=("name", "ra", "dec", "z"))
+    print("***LOCUSS***")
+    print(locuss)
+    sys.exit()
+    return locuss
 
 def load_meneacs():
     filename = "aux/lensing/meneacs_cccp.txt"

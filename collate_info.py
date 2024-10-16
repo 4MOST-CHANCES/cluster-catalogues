@@ -36,7 +36,6 @@ def main():
     # sys.exit()
 
     chances, others = load_ancillary(args, chances, "chances")
-    print(chances["name", "ra", "dec"][chances["z"] == 1])
     return
     meneacs, wings, locuss, psz, act, sptecs, sptsz, codex, mcxc = others
 
@@ -748,7 +747,8 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
         print(
             f"r200/r200_WINGS (excluding source=WINGS):\n{np.array(rdiff)}\nmedian = {np.median(rdiff):.2f}\nmean = {np.mean(rdiff):.2f}\nstd = {np.std(rdiff):.2f}"
         )
-
+    print()
+    print(qcat[qcat["source"] == "AXES-2MRS"])
     others = (meneacs, wings, locuss, psz, act, sptecs, sptsz, codex, mcxc)
     return catalog, others
 
@@ -1036,15 +1036,15 @@ def chances_catalog(args):
     use_final = True
     if args.sample == "lowz":
         # file = "catalogues-ciria/S1501_clusters_final.csv"
-        file = "catalogues/S1501_clusters_20240410.csv"
+        file = "catalogues/S1501_clusters_20241008.csv"
         file_old = "CHANCES low-z clusters.csv"
     else:
         # file = "catalogues-ciria/S1502_clusters_final.csv"
         file = "catalogues/S1502_clusters_202403.csv"
         file_old = "CHANCES Evolution clusters.csv"
-    cat = ascii.read(file, format="csv")
+    cat = ascii.read(file, format="csv", comment="#")
     print(np.sort(cat.colnames))
-    cat_old = ascii.read(file_old, format="csv")
+    cat_old = ascii.read(file_old, format="csv", comment="#")
     cat.rename_column("m200", "m200_listed")
     # happens in low-z
     if "col12" in cat.colnames:
