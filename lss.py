@@ -31,6 +31,7 @@ import ligo.skymap.plot
 from profiley.nfw import NFW
 from plottery.plotutils import savefig, update_rcParams
 from profiley.helpers.spherical import radius_from_mass
+from profiley.numeric import project
 
 from astro.clusters import ClusterCatalog
 from astro.footprint import Footprint
@@ -53,11 +54,26 @@ def main():
         )
     else:
         chances = ClusterCatalog(f"chances-{args.sample[:4]}")
-    chances.catalog["sigma"] = velocity_dispersion_from_mass(chances)
+    chances.catalog["sigma"] = velocity_dispersion_from_mass(
+        chances["m200"], chances["z"]
+    )
     chances.catalog["sigma"].format = "%.0f"
     chances, cat = find_subclusters(args, chances)
     print(chances)
     print(cat)
+    return
+    print(np.unique(cat["best_z_type"], return_counts=True))
+    ztype = cat.group_by(["best_z_type", "is_main"])
+    for key, group in zip(ztype.groups.keys, ztype.groups):
+        name = key["best_z_type"].replace("_", "\\_")
+        c = "main" if key["is_main"] == 1 else "groups"
+        key = f"{name} ({c})"
+        print_redshift_uncertainties(chances, group, f"\\texttt{{{key}}}")
+    ztype = cat.group_by("best_z_type")
+    for key, group in zip(ztype.groups.keys, ztype.groups):
+        name = key["best_z_type"].replace("_", "\\_")
+        print_redshift_uncertainties(chances, group, f"\\texttt{{{name}}}")
+    print_redshift_uncertainties(chances, cat, "All")
     if args.sample == "all":
         infall_mass_function(args, chances, cat, plottype="hist")
         infall_mass_function(args, chances, cat, plottype="hist", sigma_clip=3)
@@ -69,6 +85,49 @@ def main():
         wrap_plot_sky(args, chances, cat, show_neighbors=True, suffix="neighbors")
     chances.catalog.sort(f"N_{args.catalog}")
     # print(chances)
+
+
+def print_redshift_uncertainties(chances, group, key):
+    sigma_main = np.array(
+        [chances["sigma"][chances["name"] == cl] for cl in group["chances"]]
+    )[:, 0]
+    z_main = np.array([chances["z"][chances["name"] == cl] for cl in group["chances"]])[
+        :, 0
+    ]
+    ngr = group["best_z_type"].size
+    # percentage error
+    zerr = 100 * group["best_zerr"] / group["best_z"]
+    zerr_med = np.median(zerr)
+    zerr_range = np.percentile(zerr, [16, 84])
+    # vpec uncertainty
+    verr = c.c.to("km/s").value * group["best_zerr"] / (1 + z_main)
+    verr_med = 100 * np.round(np.median(verr) / 100, 0)
+    verr_range = 100 * np.round(np.percentile(verr / 100, [16, 84]), 0)
+    print(verr_med, verr_range)
+    # uncertainty in vpec/sigma_main
+    vserr = verr / sigma_main
+    vserr_med = np.median(vserr)
+    vserr_range = np.percentile(vserr, [16, 84])
+    print("= v1 =")
+    if zerr_range[0] < 1:
+        if zerr_range[1] < 2:
+            zp_range = f"$\\multicolumn{{2}}{{c}}{{<{zerr_range[1]:.1f}}}$"
+        else:
+            zp_range = f"$<{zerr_range[1]:.0f}$"
+    else:
+        zp_range = f"{zerr_range[0]:.0f}--{zerr_range[1]:.0f}"
+    print(f"{key} & {ngr} & {zp_range} & {verr_med:.0f} & {vserr_med:.2f}\\\\")
+    print("= v2 =")
+    zerr_range = np.abs(zerr_med - zerr_range)
+    verr_range = np.abs(verr_med - verr_range)
+    vserr_range = np.abs(vserr_med - vserr_range)
+    zstr = f"${zerr_med:.1f}$ & $_{{-{zerr_range[0]:.1f}}}^{{+{zerr_range[1]:.1f}}}$"
+    vstr = f"${verr_med:.0f}$ & $_{{-{verr_range[0]:.0f}}}^{{+{verr_range[1]:.0f}}}$"
+    vs_str = (
+        f"${vserr_med:.2f}$ & $_{{-{vserr_range[0]:.2f}}}^{{+{vserr_range[1]:.2f}}}$"
+    )
+    print(f"{key} & {ngr} & {zstr} & {vstr} & {vs_str}\\\\")
+    return
 
 
 def infall_mass_function(
@@ -187,8 +246,18 @@ def infall_mass_function(
 
 
 def phase_space(
-    args, chances, cat, hide_main=True, sigma_clip=0, yaxis="sigma", show_histogram=True
+    args,
+    chances,
+    cat,
+    hide_main=True,
+    sigma_clip=0,
+    yaxis="sigma",
+    show_histogram=True,
+    cmap="viridis",
 ):
+    # include photo-z somehow later too
+    specz = cat["best_z_type"] != "photo_z"
+    photz = cat["best_z_type"] == "photo_z"
     cat.sort("best_z")
     # sort by something random so the figure is not dominated by any single redshift
     cat.sort("dist (r200)")
@@ -227,57 +296,146 @@ def phase_space(
             < sigma_clip * sigma_main
         )
     yval = cat["vpec (km/s)"]
+    yerr = 299792 * cat["best_zerr"] / (1 + z_main)
     if yaxis == "sigma":
         yval = yval / sigma_main
+        yerr = yerr / sigma_main
     else:
         yval = yval / 1e3
+        yerr = yerr / 1e3
     # note that changing axes limits or figure size will change the symbol size
     s_factor = 34000
-    im = ax.scatter(
-        cat["dist (r200)"][mask],
-        yval[mask],
-        # s=cat["m200"][mask] / 1e12,
-        s=s_factor * (cat["r200"][mask] / r200_main[mask]) ** 2 / 30,
-        c=z_main[mask],
+    # need to convert z_main into colors using a normalized cmap for this to work
+    cnorm = Normalize(vmin=0, vmax=0.5)
+    colors = cnorm(z_main)
+    if isinstance(cmap, str):
+        cmap = plt.get_cmap(cmap)
+    colors = cmap(colors)
+    # plot_version =
+    ax.scatter(
+        cat["dist (r200)"][mask & photz],
+        yval[mask & photz],
+        # s=s_factor * (cat["r200"] / r200_main)[mask & photz] ** 2 / 30,
+        # edgecolors=colors[mask & photz],
+        # facecolors="None",
+        # lw=1,
+        # alpha=0.3,
+        s=4,
+        c=colors[mask & photz],
         alpha=0.5,
     )
+    im = ax.scatter(
+        cat["dist (r200)"][mask & specz],
+        yval[mask & specz],
+        s=s_factor * (cat["r200"] / r200_main)[mask & specz] ** 2 / 30,
+        c=z_main[mask & specz],
+        lw=0,
+        alpha=0.5,
+    )
+    # show uncertainties
+    rdm = np.random.default_rng(seed=1)
+    for m, d, v, ve, color in zip(mask & specz, cat["dist (r200)"], yval, yerr, colors):
+        if not m:
+            continue
+        if rdm.uniform() < 0.1:
+            ax.errorbar(d, v, ve, fmt=",", color=color, alpha=0.5, lw=2)
     # escape velocities
-    i = np.argmin(np.abs(m200_main - 10))
-    nfw = NFW(1e14 * m200_main[i], 5, z_main[i], overdensity=200)
-    r = np.linspace(0, 6, 1000)
-    q = nfw.cosmo.Om0 / 2 - nfw.cosmo.Ode0
-    # print(nfw.mass)
-    # r_eq = ((c.G * nfw.mass * u.Msun / q * cosmo.H(nfw.z) ** 2) ** (1 / 3)).to(u.Mpc)
-    # print(r_eq)
-    vesc = nfw.escape_velocity(r * r200_main[i], log_rmax=np.log10(r_eq))
-    print(i, 1e14 * m200_main[i], z_main[i])
-    print(np.squeeze(vesc), sigma_main[i])
-    ax.plot(r, vesc / sigma_main[i], "k-", lw=1.5)
-    ax.plot(r, -vesc / sigma_main[i], "k-", lw=1.5)
+    r = np.linspace(0, 10, 1001)[1:]
+    # m200_ref = np.array([3e14, 1e15])
+    # z_ref = np.array([0.05, 0.25, 0.5])[:, None]
+    for m200_ref, z_ref, color in zip(
+        np.array([[3e14], [1e15]]), np.array([[0.05], [0.25]]), ("C3", "C0")
+    ):
+        sigma_ref = velocity_dispersion_from_mass(m200_ref / 1e14, z_ref)
+        nfw = NFW(m200_ref, 4, z_ref, overdensity=200, background="c")
+        r200_ref = nfw.rdelta(200, "c")
+        rx = r200_ref * r
+        # for comoving coordinates
+        q = nfw.cosmo.Om0 / 2 - nfw.cosmo.Ode(z_ref)
+        r_eq = (-c.G * nfw.mdelta(200, "m")[0] * u.Msun / q / cosmo.H(z_ref) ** 2).to(
+            "Mpc^3"
+        ).value ** (1 / 3)
+        print("sigma_ref =", sigma_ref)
+        print("r200_ref =", r200_ref)
+        print("r_eq =", r_eq, rx.max())
+        # this should be incorporated in profiley
+        #
+
+        def vesc(R):
+            f = q * nfw.cosmo.H(z_ref) ** 2 * (R**2 - r_eq**2) * u.Mpc**2 / 2
+            punit = u.Mpc**2 / u.s**2
+            vesc = (
+                ((2 * ((nfw.potential(R) - nfw.potential(r_eq)) * punit - f)) ** 0.5)
+                .to("km/s")
+                .value
+            )
+            # do I need this?
+            # vesc[np.isnan(vesc)] = 0
+            return vesc
+
+        #
+        # print("vesc =", vesc(rx[:, None]), vesc(rx[:, None]).shape)
+        # the 1/sqrt(3) converts from 3d to 1d velocity.
+        # How to convert r -> r_proj?
+        ax.plot(r, vesc(rx[:, None]) / sigma_ref, f"{color}-", lw=1.5)
+        ax.plot(r, -vesc(rx[:, None]) / sigma_ref, f"{color}-", lw=1.5)
+        # print("projecting")
+        # print("rx =", rx.shape)
+        # vesc_proj = project(vesc, rx)
+        # print("proj =", vesc_proj, vesc_proj.shape)
+        # sys.exit()
+        # ax.plot(r, vesc_proj / sigma_ref, f"{color}--", lw=1.5)
+        # ax.plot(r, -vesc_proj / sigma_ref, f"{color}--", lw=1.5)
     # use this to find the size that gives a radius of 1 in data units
     # ax.scatter(1, -3, s=34000, c="k")
     # ax.grid()
     # circles = [Circle((d, y), s, color=)]
     if show_histogram:
+        use_errors = False
+        smooth = 0.2
+        evol = z_main > 0.07
         # beware this should change if axis limits change
         if yaxis == "sigma":
             vbins = np.arange(-6, 6, 1e-3)
         else:
             vbins = np.arange(-10, 10, 1e-3)
-        vx = (vbins[1:] + vbins[:-1]) / 2
-        hmask = mask & (yval >= vx[0]) & (yval <= vx[-1])
-        smooth = 0.2
-        hist = np.histogram(yval[hmask], vbins)[0]
-        kde = gaussian_kde(yval[hmask], smooth)
-        hax.plot(kde(vx), vx, "k-")
-        # evolution
-        evol = z_main > 0.07
-        kde_evol = gaussian_kde(yval[hmask & evol], smooth)
-        hax.plot(kde_evol(vx), vx, "C0-", label="Evolution")
-        kde_lowz = gaussian_kde(yval[hmask & ~evol], smooth)
-        hax.plot(kde_lowz(vx), vx, "C3-", label="Low-z")
-        hax.set_xticks([])
-        hax.legend(loc="lower right", fontsize=14)
+        if use_errors:
+            ye = np.max([yerr, smooth * np.ones(yerr.size)], axis=0)
+            h = np.exp(-((vbins[:, None] - yval) ** 2) / (2 * ye**2)) / (
+                (2 * np.pi) ** 0.5 * ye
+            )
+            print("h =", h.shape)
+            h_lowz = np.mean(h[:, mask & specz & ~evol], axis=1)
+            hax.plot(h_lowz, vbins, "C3-", label="Low-z")
+            h_evol = np.mean(h[:, mask & specz & evol], axis=1)
+            hax.plot(h_evol, vbins, "C0-", label="Evolution")
+            h_all = np.mean(h[:, mask & specz], axis=1)
+            hax.plot(h_all, vbins, "k--", label="All")
+            hax.legend(loc="lower right", fontsize=14)
+            hmax = h_lowz.max()
+        else:
+            vx = (vbins[1:] + vbins[:-1]) / 2
+            for ztype, ls in zip((photz, specz), ("--", "-")):
+                if ls == "--":
+                    continue
+                hmask = mask & (yval >= vx[0]) & (yval <= vx[-1]) & ztype
+                hist = np.histogram(yval[hmask], vbins)[0]
+                kde = gaussian_kde(yval[hmask], smooth)
+                (l3,) = hax.plot(kde(vx), vx, "k--")
+                kde_evol = gaussian_kde(yval[hmask & evol], smooth)
+                (l1,) = hax.plot(kde_evol(vx), vx, "C0", ls=ls)
+                kde_lowz = gaussian_kde(yval[hmask & ~evol], smooth)
+                (l2,) = hax.plot(kde_lowz(vx), vx, "C3-", ls=ls)
+            legend = hax.legend(
+                (l2, l1, l3),
+                ("Low-z", "Evolution", "All"),
+                loc="lower right",
+                fontsize=14,
+            )
+            hmax = kde_lowz(vx).max()
+        hax.xaxis.set_major_locator(ticker.MultipleLocator(hmax / 2))
+        hax.set_xticklabels([])
+        hax.set_xlim(0, hax.get_xlim()[1])
         cbar = plt.colorbar(im, ax=axes, orientation="horizontal", location="top")
         cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
     else:
@@ -300,7 +458,7 @@ def phase_space(
     if show_histogram:
         output = f"{output}_hist"
 
-    savefig(f"{output}.pdf", fig=fig, tight=False)
+    savefig(f"{output}_v4.pdf", fig=fig, tight=False)
     return
 
 
@@ -790,6 +948,7 @@ def find_subclusters(
         "dist (Mpc)",
         "dist (r200)",
         "vpec (km/s)",
+        # "vpec_err",
         "is_main",
     ]
     matches = {key: [] for key in cols}
@@ -828,6 +987,7 @@ def find_subclusters(
         matches["dist (r200)"].extend(dist_r200)
         matches["dist (Mpc)"].extend(dist)
         matches["vpec (km/s)"].extend(299792.5 * (cat["z"][close] - z) / (1 + z))
+        # matches["vpec_err"].extend(299792.5 * )
         main_candidates = dist_r200 < 1
         if close.sum() > 0 and np.any(main_candidates):
             is_main = main_candidates & (rich == rich[main_candidates].max())
@@ -849,6 +1009,7 @@ def find_subclusters(
     for col in ("best_z", "best_zerr"):
         matches[col].format = ".4f"
     matches["vpec (km/s)"].format = ".0f"
+    matches["vdisp (km/s)"].format = ".0f"
     print(matches)
     print(matches[matches[lambdacol] - matches[f"{lambdacol}_e"] >= 5])
     # main cluster statistics
@@ -862,12 +1023,12 @@ def find_subclusters(
     return chances, matches
 
 
-def velocity_dispersion_from_mass(chances):
-    """Munari et al. (2013), M200c. Note that the"""
+def velocity_dispersion_from_mass(m200, z):
+    """Munari et al. (2013), M200c. Mass must be in 1e14 Msun"""
     A = 1177
     alpha = 0.364
-    hz = cosmo.H(chances["z"]).value / 100
-    return A * (hz * 1e14 * chances["m200"] / 1e15) ** alpha
+    hz = cosmo.H(z).value / 100
+    return A * (hz * 1e14 * m200 / 1e15) ** alpha
 
 
 def parse_args():
