@@ -7,6 +7,7 @@ from datetime import date
 from icecream import ic
 from matplotlib import pyplot as plt, ticker
 import numpy as np
+import os
 from scipy.optimize import curve_fit
 import sys
 
@@ -15,7 +16,7 @@ from plottery.plotutils import savefig, update_rcParams
 from linmix import LinMix
 
 from astro.clusters import ClusterCatalog
-from lnr import bces, kelly, to_linear, to_log, mcmc
+from lnr import to_linear, to_log, mle
 
 update_rcParams()
 
@@ -51,8 +52,9 @@ def main():
         )
     act.catalog["m200_err"] = act["M500cCal_err"] / act["M500cCal"] * act["m200"]
     print(np.sort(erass.colnames))
-    psz.catalog["MSZ_err"] = 0.5 * (psz["MSZ_ERR_LOW"] + psz["MSZ_ERR_UP"])
-    psz.catalog["m200_err"] = psz["MSZ_err"] / psz["MSZ"] * psz["m200"]
+    # psz.catalog["MSZ_err"] = 0.5 * (psz["MSZ_ERR_LOW"] + psz["MSZ_ERR_UP"])
+    psz.catalog["MSZ_err"] = np.max([psz["MSZ_ERR_LOW"], psz["MSZ_ERR_UP"]], axis=0)
+    psz.catalog["m200_err"] = (psz["MSZ_err"] / psz["MSZ"]) * psz["m200"]
     # erass.catalog["M500_err"] = 0.5 * (erass["M500_L"] + erass["M500_H"])
     # upper uncertainties are usually larger than the mass estimate!
     erass.catalog["M500_err"] = erass["M500_L"]
@@ -164,10 +166,18 @@ def main():
         psz, axes2mrs, radius=max_radius
     )
     print(f"{psz_in_axes2mrs.sum()}/{psz_in_axes2mrs.size} PSZ-AXES2MRS matches")
-    meneacs_locuss_closest, meneacs_in_locuss = match_catalogs(meneacs, locuss, radius=max_radius)
-    print(f"{meneacs_in_locuss.sum()}/{meneacs_in_locuss.size} MENeaCS/LoCuSS matches")
+    # meneacs_locuss_closest, meneacs_in_locuss = match_catalogs(
+    #     meneacs, locuss, radius=max_radius
+    # )
+    # print(f"{meneacs_in_locuss.sum()}/{meneacs_in_locuss.size} MENeaCS/LoCuSS matches")
 
-    fit_and_plot("LoCuSS", "MENeaCS", locuss, meneacs, )
+    fitfile = "output/mass_normalization_fits.txt"
+    with open(fitfile, "w") as f:
+        print(
+            "x y xcol ycol Nmatches massnorm log_norm log_normerr log_sint log_sinterr",
+            file=f,
+        )
+    kwargs = dict(output=fitfile)
     fit_and_plot(
         "CODEX",
         "eRASS1",
@@ -178,6 +188,7 @@ def main():
         "m200_err",
         xmask=erass_codex_closest[erass_in_codex],
         ymask=erass_in_codex,
+        **kwargs,
     )
     fit_and_plot(
         "AXES-2MRS",
@@ -187,9 +198,12 @@ def main():
         "M200c",
         "m200",
         "m200_err",
+        merrcol_axes2mrs,
         xmask=psz_axes2mrs_closest[psz_in_axes2mrs],
         ymask=psz_in_axes2mrs,
+        **kwargs,
     )
+    # return
     fit_and_plot(
         "WINGS",
         "MCXC",
@@ -199,6 +213,7 @@ def main():
         "m200",
         xmask=mcxc_wings_closest[mcxc_in_wings],
         ymask=mcxc_in_wings,
+        **kwargs,
     )
     fit_and_plot(
         "MENEACS",
@@ -210,6 +225,7 @@ def main():
         "m200_err",
         xmask=erass_meneacs_closest[erass_in_meneacs],
         ymask=erass_in_meneacs,
+        **kwargs,
     )
     fit_and_plot(
         "AXES-2MRS",
@@ -221,6 +237,7 @@ def main():
         "m200_err",
         xmask=erass_axes2mrs_closest[erass_in_axes2mrs],
         ymask=erass_in_axes2mrs,
+        **kwargs,
     )
     fit_and_plot(
         "CODEX",
@@ -232,6 +249,7 @@ def main():
         merrcol_act,
         xmask=act_codex_closest[act_in_codex],
         ymask=act_in_codex,
+        **kwargs,
     )
     fit_and_plot(
         "CODEX",
@@ -244,6 +262,7 @@ def main():
         xmask=act_codex_closest[act_in_codex],
         ymask=act_in_codex,
         suffix="sigma",
+        **kwargs,
     )
     fit_and_plot(
         "WINGS",
@@ -255,6 +274,7 @@ def main():
         "m200_err",
         xmask=erass_wings_closest[erass_in_wings],
         ymask=erass_in_wings,
+        **kwargs,
     )
     fit_and_plot(
         "WINGS",
@@ -266,6 +286,7 @@ def main():
         "m200_err",
         xmask=psz_wings_closest[psz_in_wings],
         ymask=psz_in_wings,
+        **kwargs,
     )
     fit_and_plot(
         "PSZ2",
@@ -277,6 +298,7 @@ def main():
         "m200_err",
         xmask=psz_in_wings,
         ymask=psz_wings_closest[psz_in_wings],
+        **kwargs,
     )
     fit_and_plot(
         "WINGS",
@@ -288,6 +310,7 @@ def main():
         merrcol_act,
         xmask=act_wings_closest[act_in_wings],
         ymask=act_in_wings,
+        **kwargs,
     )
     fit_and_plot(
         "PSZ2",
@@ -299,6 +322,7 @@ def main():
         merrcol_act,
         xmask=act_psz_closest[act_in_psz],
         ymask=act_in_psz,
+        **kwargs,
     )
     fit_and_plot(
         "ACT-DR5",
@@ -310,6 +334,7 @@ def main():
         "m200_err",
         xmask=erass_act_closest[erass_in_act],
         ymask=erass_in_act,
+        **kwargs,
     )
     fit_and_plot(
         "eRASS1",
@@ -321,6 +346,7 @@ def main():
         merrcol_act,
         xmask=act_erass_closest[act_in_erass],
         ymask=act_in_erass,
+        **kwargs,
     )
     fit_and_plot(
         "MCXC",
@@ -332,6 +358,7 @@ def main():
         merrcol_act,
         xmask=act_mcxc_closest[act_in_mcxc],
         ymask=act_in_mcxc,
+        **kwargs,
     )
     fit_and_plot(
         "CODEX",
@@ -343,6 +370,7 @@ def main():
         merrcol_axes2mrs,
         xmask=axes2mrs_codex_closest[axes2mrs_in_codex],
         ymask=axes2mrs_in_codex,
+        **kwargs,
     )
     fit_and_plot(
         "CODEX",
@@ -354,6 +382,7 @@ def main():
         merrcol_axesls,
         xmask=axesls_codex_closest[axesls_in_codex],
         ymask=axesls_in_codex,
+        **kwargs,
     )
     fit_and_plot(
         "AXES-2MRS",
@@ -365,6 +394,7 @@ def main():
         merrcol_axesls,
         xmask=axesls_axes2mrs_closest[axesls_in_axes2mrs],
         ymask=axesls_in_axes2mrs,
+        **kwargs,
     )
     fit_and_plot(
         "AXES-LS",
@@ -376,6 +406,7 @@ def main():
         merrcol_axes2mrs,
         xmask=axesls_in_axes2mrs,
         ymask=axesls_axes2mrs_closest[axesls_in_axes2mrs],
+        **kwargs,
     )
     fit_and_plot(
         "AXES-LS",
@@ -387,7 +418,9 @@ def main():
         merrcol_act,
         xmask=act_axesls_closest[act_in_axesls],
         ymask=act_in_axesls,
+        **kwargs,
     )
+    return
 
 
 def fit_and_plot(
@@ -402,30 +435,29 @@ def fit_and_plot(
     xmask=None,
     ymask=None,
     suffix=None,
+    output=None,
 ):
-    """Add a mask to exclude objects from the fit. This will allow to mask AXES-2MRS_PSZ2 clusters based on redshift rather than mass comparison, for instance."""
+    print("fitting and plotting")
+    print(f"x: {xlabel} {np.sort(x.colnames)}")
+    print(f"y: {ylabel} {np.sort(y.colnames)}")
     if xmask is None:
         xmask = np.ones(x.shape, dtype=bool)
     if ymask is None:
         ymask = np.ones(y.shape, dtype=bool)
-    if yerrcol is None:
-        fit_norm, fit_normcov = fit_mass_ratio(x[xcol][xmask], y[ycol][ymask], p0=(1,))
-    else:
-        fit_norm, fit_normcov = fit_mass_ratio(
-            x[xcol][xmask],
-            y[ycol][ymask],
-            y[yerrcol][ymask],
-            p0=(1,),
-        )
+    kwargs = dict(p0=(1,), emass_x=None, emass_y=None)
+    if yerrcol is not None:
+        kwargs["emass_y"] = y[yerrcol][ymask]
+    if xerrcol is not None:
+        kwargs["emass_x"] = x[xerrcol][xmask]
+    fit_norm, fit_normerr = fit_mass_ratio(x[xcol][xmask], y[ycol][ymask], **kwargs)
     xrng = np.linspace(14, 15.7, 100)
     fig, ax = plt.subplots(figsize=(5, 4), constrained_layout=True)
     if yerrcol is None:
         ax.plot(x[xcol][xmask], y[ycol][ymask], "o", color="k")
     else:
-        ax.errorbar(
-            x[xcol][xmask],
-            y[ycol][ymask],
-            y[yerrcol][ymask],
+        kwargs = dict(
+            yerr=kwargs["emass_y"],
+            xerr=kwargs["emass_y"],
             fmt=".",
             color="k",
             mew=0,
@@ -433,34 +465,17 @@ def fit_and_plot(
             alpha=0.4,
             zorder=10,
         )
+        ax.errorbar(x[xcol][xmask], y[ycol][ymask], **kwargs)
         ax.plot(x[xcol][xmask], y[ycol][ymask], "o", color="k", ms=2, zorder=10)
-    # need redshifts
-    # ax.scatter(x[xcol][xmask], y[ycol][ymask], c=x[], zorder=10)
-    if xlabel == "AXES-2MRS" and ylabel == "PSZ2":
-        j = y[ycol][ymask] < 2 * x[xcol][xmask]
-        norm2, normcov2 = fit_mass_ratio(x[xcol][xmask][j], y[ycol][ymask][j], p0=(1,))
-        ax.plot(
-            10**xrng,
-            10 ** line(xrng, *norm2),
-            "C1-",
-            lw=3,
-            zorder=100,
-            alpha=0.7,
-            label=f"y = {10**norm2[0]:.2f}x",
-        )
-        ax.plot(
-            x[xcol][xmask][~j], y[ycol][ymask][~j], "o", mfc="w", mec="k", zorder=10
-        )
-    else:
-        ax.plot(
-            10**xrng,
-            10 ** line(xrng, *fit_norm),
-            "C1-",
-            lw=3,
-            zorder=100,
-            alpha=0.7,
-            label=f"y = {10**fit_norm[0]:.2f}x",
-        )
+    ax.plot(
+        10**xrng,
+        10 ** line(xrng, fit_norm[0]),
+        "C1-",
+        lw=3,
+        zorder=100,
+        alpha=0.7,
+        label=f"y = {10**fit_norm[0]:.2f}x",
+    )
     if xlabel == "MCXC" and ylabel == "ACT-DR5":
         mask = y[ycol][ymask] > 10 * x[xcol][xmask]
         print(x["name", "OName", "AName", "z", "m200"][xmask][mask])
@@ -479,11 +494,24 @@ def fit_and_plot(
         xlim=(3e13, 5e15),
         ylim=(8e13, 5e15),
     )
-    output = f"plots/compare_masses/masses_{xlabel.lower()}_{ylabel.lower()}"
+    plotname = f"plots/compare_masses/masses_{xlabel.lower()}_{ylabel.lower()}"
     if suffix:
-        output = f"{output}_{suffix}"
+        plotname = f"{plotname}_{suffix}"
     for ext in ("png", "pdf"):
-        savefig(f"{output}.{ext}", fig=fig, tight=False)
+        savefig(f"{plotname}.{ext}", fig=fig, tight=False)
+    with open(output, "a") as f:
+        # main information
+        print(
+            f"{xlabel:12s} {xcol:12s} {ylabel:12s} {ycol:12s} {xmask.sum()} {10**fit_norm[0]:.2f}",
+            end=" ",
+            file=f,
+        )
+        # fit parameters
+        print(
+            f"{fit_norm[0]:.3f} {fit_normerr[0]:.3f} {fit_norm[1]:.3f} {fit_normerr[1]:.3f}",
+            file=f,
+        )
+    return
 
 
 def fit_mass_ratio(
@@ -510,16 +538,13 @@ def fit_mass_ratio(
             to_log(mass_x, emass_x, which="lower")[1]
             + to_log(mass_x, emass_x, which="upper")[1]
         ) / 2
-    # print(ey)
+        ex = ex[mask]
     if use_linmix:
         lm = LinMix(x, y, xsig=ex, ysig=ey)
-    fit, fitcov = curve_fit(line, x, y, p0=p0, sigma=ey, absolute_sigma=True)
-    # fit = mcmc(mass_x, mass_y, x2err=emass_y, output=[50, 16, 84])
-    # fit = kelly(mass_x, mass_y, x2err=emass_y, output="percentiles")
-    print(fit)
-    return fit, fitcov
-    fit, fiterr = np.transpose(bces(mass_x, mass_y, x2err=emass_y, full_output=False))
-    print(fit)
+    fit, fiterr = mle(
+        x, y, x1err=ex, x2err=ey, slope=1, s_int=True, start=(0.8, 0.2), logify=False
+    )
+    print("MLE:", 10**fit, fiterr)
     return fit, fiterr
 
 
@@ -553,19 +578,21 @@ def load_codex():
     codex.rename_column("z_lambda", "z")
     return codex
 
+
 def load_locuss():
-    filename = "aux/lensing/locuss/locuss-tab-mass-corr.csv"
+    path = "aux/lensing/locuss"
+    filename = os.path.join(path, "locuss-tab-mass-corr.csv")
     locuss = ascii.read(filename, format="csv")
+    locuss_z = ascii.read(os.path.join(path, "tab-sample_z.csv"), format="csv")
+    locuss = join(locuss, locuss_z, keys="name")
     locuss["name"] = [
         name.replace("ABELL", "Abell ").replace("RXC", "RXC ")
         for name in locuss["name"]
     ]
-    print(np.sort(locuss.colnames))
     locuss = ClusterCatalog("LoCuSS", locuss, base_cols=("name", "ra", "dec", "z"))
-    print("***LOCUSS***")
-    print(locuss)
-    sys.exit()
+    # sys.exit()
     return locuss
+
 
 def load_meneacs():
     filename = "aux/lensing/meneacs_cccp.txt"

@@ -35,9 +35,9 @@ def main():
     print(chances)
     # sys.exit()
 
-    chances, others = load_ancillary(args, chances, "chances")
+    chances, others = load_ancillary(args, chances, "chances", save=True)
     return
-    meneacs, wings, locuss, psz, act, sptecs, sptsz, codex, mcxc = others
+    # meneacs, wings, locuss, psz, act, sptecs, sptsz, codex, mcxc = others
 
     # print('\n\n*** Missing from CHANCES ***\n')
     # missing = review_missing(args, chances, *others)
@@ -437,7 +437,7 @@ def selection_function(m, m0, sigma, a_m=0):
 ### External catalogs ###
 
 
-def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
+def load_ancillary(args, catalog, catalog_name, cosmo=Planck18, save=True):
     use_axesls = True
     # these are the ones from which I might get a mass
     catalog, psz = load_catalog(args, catalog, "psz2")
@@ -448,6 +448,7 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     catalog, mcxc = load_catalog(args, catalog, "mcxc")
     catalog, redmapper = load_catalog(args, catalog, "redmapper")
     catalog, codex = load_codex(args, catalog)
+    # catalog, axes = load_axes(args, catalog)
     catalog, axes2mrs = load_axes2mrs(args, catalog)
     catalog, axesls = load_axesls(args, catalog)
     catalog, comalit = load_comalit(args, catalog)
@@ -651,58 +652,65 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
     # we don't want it in the table!
     catalog.remove_column("coords")
 
-    today = date.today().strftime("%Y%m%d")
-    output = f"catalogues/clusters_{catalog_name}_{args.sample}_{today}"
-    # long-form tables with all the details
-    for col in catalog.colnames:
-        if "m200" in col.lower() or "m500" in col.lower():
-            catalog[col].format = "%.2e"
-    # comments
-    catalog.meta["comments"].append(
-        "masscols: "
-        + " ".join([f"{name}:{col}" for name, col in catalog.masscols.items()])
-    )
-    catalog.meta["comments"].append(
-        "factors: " + " ".join([f"{name}:{f}" for name, f in catalog.factors.items()])
-    )
-    catalog.write(
-        f"{output}_large.txt", comment="#", format="ascii.fixed_width", overwrite=True
-    )
-    catalog.write(
-        f"{output}_large.csv", comment="#", format="ascii.csv", overwrite=True
-    )
-    cols = ["name", "hms", "dms", "z", "m200", "r200", "d200", "source"]
-    units = {
-        "ra": "deg",
-        "dec": "deg",
-        "hms": "hh:mm:ss",
-        "dms": "dd:mm:ss",
-        "m200": "1e14 * Msun",
-        "r200": "Mpc",
-        "d200": "arcmin",
-        "5d200(deg)": "deg",
-    }
-    # qcat = QTable(
-    #     catalog[cols], units={key: unit for key, unit in units.items() if key in cols}
-    # )
-    qcat = Table(catalog[cols])
-    qcat.meta["comments"] = catalog.meta["comments"] + [
-        "Units: " + ",".join(units.get(key, "1") for key in cols)
-    ]
-    qcat["m200"] = qcat["m200"] / 1e14
-    qcat["m200"].format = "%.1f"
-    # qcat.write(f"{output}.ecsv", format="ascii.ecsv", overwrite=True)
-    qcat.write(f"{output}.txt", format="ascii.fixed_width", comment="#", overwrite=True)
-    qcat.write(f"{output}.csv", format="ascii.csv", comment="#", overwrite=True)
-    # qcat.rename_column("hms", "ra")
-    qcat["name"] = [
-        name.replace("-", "$-$").replace(" 00", " ").replace(" 0", " ")
-        for name in catalog["name"]
-    ]
-    qcat["dms"] = [f"${d[0]}${d[1:]}" for d in catalog["dms"]]
-    qcat["z"].format = "%.3f"
-    qcat.write(f"{output}.tex", format="ascii.latex", overwrite=True)
-    print(f"Saved to {output} and {output}_large")
+    if save:
+        today = date.today().strftime("%Y%m%d")
+        output = f"catalogues/clusters_{catalog_name}_{args.sample}_{today}"
+        # long-form tables with all the details
+        for col in catalog.colnames:
+            if "m200" in col.lower() or "m500" in col.lower():
+                catalog[col].format = "%.2e"
+        # comments
+        catalog.meta["comments"].append(
+            "masscols: "
+            + " ".join([f"{name}:{col}" for name, col in catalog.masscols.items()])
+        )
+        catalog.meta["comments"].append(
+            "factors: "
+            + " ".join([f"{name}:{f}" for name, f in catalog.factors.items()])
+        )
+        catalog.write(
+            f"{output}_large.txt",
+            comment="#",
+            format="ascii.fixed_width",
+            overwrite=True,
+        )
+        catalog.write(
+            f"{output}_large.csv", comment="#", format="ascii.csv", overwrite=True
+        )
+        cols = ["name", "hms", "dms", "z", "m200", "r200", "d200", "source"]
+        units = {
+            "ra": "deg",
+            "dec": "deg",
+            "hms": "hh:mm:ss",
+            "dms": "dd:mm:ss",
+            "m200": "1e14 * Msun",
+            "r200": "Mpc",
+            "d200": "arcmin",
+            "5d200(deg)": "deg",
+        }
+        # qcat = QTable(
+        #     catalog[cols], units={key: unit for key, unit in units.items() if key in cols}
+        # )
+        qcat = Table(catalog[cols])
+        qcat.meta["comments"] = catalog.meta["comments"] + [
+            "Units: " + ",".join(units.get(key, "1") for key in cols)
+        ]
+        qcat["m200"] = qcat["m200"] / 1e14
+        qcat["m200"].format = "%.1f"
+        # qcat.write(f"{output}.ecsv", format="ascii.ecsv", overwrite=True)
+        qcat.write(
+            f"{output}.txt", format="ascii.fixed_width", comment="#", overwrite=True
+        )
+        qcat.write(f"{output}.csv", format="ascii.csv", comment="#", overwrite=True)
+        # qcat.rename_column("hms", "ra")
+        qcat["name"] = [
+            name.replace("-", "$-$").replace(" 00", " ").replace(" 0", " ")
+            for name in catalog["name"]
+        ]
+        qcat["dms"] = [f"${d[0]}${d[1:]}" for d in catalog["dms"]]
+        qcat["z"].format = "%.3f"
+        qcat.write(f"{output}.tex", format="ascii.latex", overwrite=True)
+        print(f"Saved to {output} and {output}_large")
 
     summarize_ancillary(args, catalog)
     summarize_masses(args, catalog)
@@ -748,7 +756,6 @@ def load_ancillary(args, catalog, catalog_name, cosmo=Planck18):
             f"r200/r200_WINGS (excluding source=WINGS):\n{np.array(rdiff)}\nmedian = {np.median(rdiff):.2f}\nmean = {np.mean(rdiff):.2f}\nstd = {np.std(rdiff):.2f}"
         )
     print()
-    print(qcat[qcat["source"] == "AXES-2MRS"])
     others = (meneacs, wings, locuss, psz, act, sptecs, sptsz, codex, mcxc)
     return catalog, others
 
@@ -1277,87 +1284,6 @@ def match_catalog(chances, cat, radius=5 * u.arcmin, dz=0.1, name=None):
     return chances, cat
 
 
-#### MUSE query ####
-
-
-def run_query(args, catalog):
-    names = [
-        "index",
-        "name",
-        "ra",
-        "dec",
-        "z",
-        "m200",
-        "object",
-        "texp(s)",
-        "dist(Mpc)",
-        "proposal",
-        "dp_id",
-    ]
-    write_formats = {
-        "index": "%5d",
-        "ra": "%10.6f",
-        "dec": "%9.5f",
-        "z": "%.3f",
-        "lambda": "%5.1f",
-        **{
-            name: "%s"
-            for name in ("name", "proposal", "object", "dp_id", "texp(s)", "dist(Mpc)")
-        },
-    }
-    ncl = catalog["name"].size
-    nblocks = ncl // args.block_size + 1
-    query = None
-    eso = Eso()
-    Eso.login("cjsifon", store_password=True)
-    for iblock in range(nblocks):
-        print(f"Block # {iblock+1:2d} / {nblocks}")
-        start = iblock * args.block_size
-        end = min((iblock + 1) * args.block_size, ncl)
-        ic(catalog["ra", "dec"][start:end])
-        if args.threads == 1:
-            q = [
-                query_cluster(args, cosmo, eso, i, cluster)
-                for i, cluster in tqdm(
-                    enumerate(catalog[start:end], iblock * args.block_size),
-                    total=end - start,
-                )
-            ]
-        else:
-            ti = time()
-            pool = ThreadPool(args.threads)
-            q = [
-                pool.apply_async(query_cluster, args=(args, cosmo, eso, i, cluster))
-                for i, cluster in enumerate(
-                    catalog[start:end], iblock * args.block_size
-                )
-            ]
-            pool.close()
-            pool.join()
-            q = [i.get() for i in q]
-            print(f"Done in {(time()-ti)/60:.2f} min")
-        q = [i for i in q if i is not None]
-        if len(q) == 0:
-            continue
-        q = [[obs[j] for obs in q] for j in range(len(q[0]))]
-        ic(len(q), len(q[0]))
-        ic(names, len(names))
-        if query is None:
-            query = Table(q, names=names)
-        else:
-            query = vstack([query, Table(q, names=names)])
-        print(f'Have found data for {len(query["name"])} clusters')
-        query.write("archive_info/programs.fits", format="fits", overwrite=True)
-        query.write(
-            "archive_info/programs.txt",
-            format="ascii.fixed_width",
-            formats=write_formats,
-            overwrite=True,
-        )
-        print("-----")
-    return
-
-
 def query_cluster(args, cosmo, eso, i, cluster):
     """Takes a single row from the redmapper catalog"""
     a2k = cosmo.arcsec_per_kpc_proper(cluster["z"])
@@ -1501,6 +1427,45 @@ def load_gal_tgss(args, chances):
 
 
 ### Cluster catalogs ###
+
+
+def load_axes(args, chances):
+    """Combine AXES-2MRS and AXES-LEGACY"""
+    # AXES-2MRS
+    filename = "aux/xray/Xmass_BayesGroups_n3ext200kpc_nofake_info2.fits"
+    cols = [
+        "C3ID",
+        "RA_X",
+        "DEC_X",
+        "z",
+        "M200c",
+        "eM200c",
+        # "M500",
+        # "eM500",
+        "Lx",
+        "eLx",
+    ]
+    axes2mrs = Table(fits.open(filename)[1].data)
+    axes2mrs["M200c"] /= 1e14
+    axes2mrs["eM200c"] /= 1e14
+    # AXES-LEGACY
+    filename = "aux/xray/Xmass_axes_legacy.cat"
+    cols = ["CODEX3", "RA_X", "DEC_X", "zcmb", "Lx", "M200c", "eM200c", "sigma"]
+    axesls = Table.read(filename, format="ascii.commented_header", include_names=cols)
+    axesls["M200c"] /= 1e14
+    axesls["eM200c"] /= 1e14
+    j = np.isin(axes2mrs["C3ID"], axesls["CODEX3"])
+    axes = join(
+        axes2mrs,
+        axesls,
+        join_type="outer",
+        keys_left="C3ID",
+        keys_right="CODEX3",
+        table_names=("2mrs", "legacy"),
+    )
+    print(axes)
+    print("sizes =", axes2mrs["C3ID"].size, axesls["CODEX3"].size)
+    # sys.exit()
 
 
 def load_axes2mrs(args, chances):

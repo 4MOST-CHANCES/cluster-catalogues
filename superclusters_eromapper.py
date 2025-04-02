@@ -81,7 +81,10 @@ def main():
 
     cat = load_eromapper()
     # we don't need the rest
-    cat.catalog = cat[(cat["best_z"] > 0.002) & (cat["best_z"] < 0.08)]
+    cat.catalog = cat[(cat["best_z"] > 0.002) & (cat["best_z"] < 0.1)]
+    print(np.sort(cat["best_z"]))
+    print(np.sort(cat["z"]))
+    return
 
     # need this first pass to find clusters in the SCs
     colors = [[0, 0, 1], [0.4, 0.4, 0.4], [1, 0, 0]]

@@ -7,6 +7,6 @@ __pycache__
 .ipynb_checkpoints
 
 aux/
-catalogues-v0/
-catalogues-previous/
+catalogues-*
+paper
 plots/

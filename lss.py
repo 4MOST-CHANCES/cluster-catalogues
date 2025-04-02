@@ -2,18 +2,16 @@ from argparse import ArgumentParser
 from astropy import units as u, constants as c
 from astropy.coordinates import SkyCoord
 from astropy.cosmology import Planck18 as cosmo
-from astropy.table import Table, vstack
+from astropy.table import Table, join, vstack
+from astropy.visualization import hist
 import cmasher as cmr
 from colossus.cosmology import cosmology
 from colossus.halo.mass_adv import changeMassDefinitionCModel
 from datetime import date
 from glob import glob
-from icecream import ic
-from matplotlib import pyplot as plt, ticker
+from matplotlib import cm, pyplot as plt, ticker
 from matplotlib.cm import ScalarMappable
-from matplotlib.collections import PatchCollection
 from matplotlib.colors import LinearSegmentedColormap, Normalize
-from matplotlib.patches import Circle
 import numpy as np
 import os
 from scipy.interpolate import CubicSpline
@@ -30,8 +28,6 @@ from tqdm import tqdm
 import ligo.skymap.plot
 from profiley.nfw import NFW
 from plottery.plotutils import savefig, update_rcParams
-from profiley.helpers.spherical import radius_from_mass
-from profiley.numeric import project
 
 from astro.clusters import ClusterCatalog
 from astro.footprint import Footprint
@@ -49,6 +45,10 @@ def main():
     if args.sample == "all":
         lowz = ClusterCatalog("chances-lowz")
         evol = ClusterCatalog("chances-evol")
+        print(lowz["name"].value)
+        print(evol["name"].value)
+        print(lowz["name"].size, evol["name"].size)
+        print()
         chances = ClusterCatalog(
             "chances", vstack([lowz.catalog, evol.catalog]), masscol="m200"
         )
@@ -59,9 +59,9 @@ def main():
     )
     chances.catalog["sigma"].format = "%.0f"
     chances, cat = find_subclusters(args, chances)
+    compare_redmapper_masses(args, chances, cat)
     print(chances)
     print(cat)
-    return
     print(np.unique(cat["best_z_type"], return_counts=True))
     ztype = cat.group_by(["best_z_type", "is_main"])
     for key, group in zip(ztype.groups.keys, ztype.groups):
@@ -78,13 +78,73 @@ def main():
         infall_mass_function(args, chances, cat, plottype="hist")
         infall_mass_function(args, chances, cat, plottype="hist", sigma_clip=3)
         infall_mass_function(args, chances, cat, plottype="points", sigma_clip=3)
-        phase_space(args, chances, cat, yaxis="sigma")
+        phase_space(args, chances, cat, yaxis="sigma", max_yerr_sigma=1)
         phase_space(args, chances, cat, yaxis="km/s")
     else:
         wrap_plot_sky(args, chances, cat, show_neighbors=False)
         wrap_plot_sky(args, chances, cat, show_neighbors=True, suffix="neighbors")
     chances.catalog.sort(f"N_{args.catalog}")
     # print(chances)
+    return
+
+
+def compare_redmapper_masses(args, chances, redmapper):
+    combined = join(
+        chances.catalog,
+        redmapper[redmapper["is_main"] == 1],
+        keys_left="name",
+        keys_right="chances",
+        join_type="inner",
+        table_names=("cl", "gr"),
+    )
+    print(combined)
+    diff = np.log10(combined["m200_gr"] / (1e14 * combined["m200_cl"]))
+    stats = np.percentile(diff, [16, 50, 84]).value
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), layout="constrained")
+    ax = axes[0]
+    ax.plot(1e14 * combined["m200_cl"], combined["m200_gr"], "ko")
+    if args.sample == "evolution":
+        t = np.logspace(14, 15.7, 10)
+        xylim = (2e14, 5e15)
+        hxlim = (-0.7, 0.7)
+    else:
+        t = np.logspace(13, 15.3)
+        xylim = (5e13, 2e15)
+        hxlim = (-1.4, 1.4)
+    ax.plot(t, t, "k-")
+    ax.plot(t, (1 + stats[1]) * t, "C0--")
+    ax.plot(t, (1 + stats[0]) * t, "C0:")
+    ax.plot(t, (1 + stats[2]) * t, "C0:")
+    ax.set(
+        xscale="log",
+        yscale="log",
+        xlabel="CHANCES mass",
+        ylabel="redMaPPer mass",
+        xlim=xylim,
+        ylim=xylim,
+    )
+    ax.set_title(args.sample.capitalize(), fontsize=14)
+    ax = axes[1]
+    hist(diff, "knuth", ax=ax, histtype="stepfilled", color="0.5")
+    ax.annotate(
+        f"median = ${stats[1]:.2f}$ dex\nrange = $[{stats[0]:.2f}, {stats[2]:.2f}]$ dex",
+        xy=(0.03, 0.97),
+        xycoords="axes fraction",
+        va="top",
+        ha="left",
+        fontsize=14,
+    )
+    ax.axvline(0, color="k", ls="-")
+    ax.axvline(stats[1], color="C0", ls="--")
+    ax.axvline(stats[0], color="C0", ls=":")
+    ax.axvline(stats[2], color="C0", ls=":")
+    ax.set(
+        xlabel="$\log M_{200}^\\mathrm{rm} - \log M_{200}^\\mathrm{CHANCES}$",
+        xlim=hxlim,
+    )
+    output = f"plots/lss/compare_redmapper_masses_{args.sample}.png"
+    savefig(output, fig=fig, tight=False)
+    return
 
 
 def print_redshift_uncertainties(chances, group, key):
@@ -100,9 +160,13 @@ def print_redshift_uncertainties(chances, group, key):
     zerr_med = np.median(zerr)
     zerr_range = np.percentile(zerr, [16, 84])
     # vpec uncertainty
-    verr = c.c.to("km/s").value * group["best_zerr"] / (1 + z_main)
+    # verr = c.c.to("km/s").value * group["best_zerr"] / (1 + z_main)
+    # testing updated cg_specz errors
+    verr = group["vpec_err"]
     verr_med = 100 * np.round(np.median(verr) / 100, 0)
     verr_range = 100 * np.round(np.percentile(verr / 100, [16, 84]), 0)
+    # verr_med = np.median(verr)
+    # verr_range = np.percentile(verr, [16, 84])
     print(verr_med, verr_range)
     # uncertainty in vpec/sigma_main
     vserr = verr / sigma_main
@@ -151,6 +215,8 @@ def infall_mass_function(
         mask = cat["is_main"] == 0
     else:
         mask = np.ones(cat["is_main"].size, dtype=bool)
+    specz = cat["best_z_type"] != "photo_z"
+    mask = mask & specz
     masks = [mask, mask & (z_main <= 0.07), mask & (z_main > 0.07)]
     labels = ["All", "Low-z", "Evolution"]
     colors = ["k", "C0", "C3"]
@@ -235,7 +301,7 @@ def infall_mass_function(
     )
     ax.set_xlim(2e-3, 2)
     if plottype == "points":
-        ax.set_ylim(0.007, 4)
+        ax.set_ylim(0.007, 1)
     ax.set_xticks(np.logspace(-2, 0, 3), ["0.01", "0.1", "1"])
     ax.set_yticks(np.logspace(-2, 0, 3), ["0.01", "0.1", "1"])
     # ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%d"))
@@ -251,10 +317,12 @@ def phase_space(
     cat,
     hide_main=True,
     sigma_clip=0,
+    max_yerr_sigma=0,
     yaxis="sigma",
     show_histogram=True,
     cmap="viridis",
 ):
+    rdm = np.random.default_rng(seed=1)
     # include photo-z somehow later too
     specz = cat["best_z_type"] != "photo_z"
     photz = cat["best_z_type"] == "photo_z"
@@ -295,8 +363,14 @@ def phase_space(
             light * np.abs(cat["best_z"] - z_main) / (1 + z_main)
             < sigma_clip * sigma_main
         )
+    best = mask & specz
     yval = cat["vpec (km/s)"]
-    yerr = 299792 * cat["best_zerr"] / (1 + z_main)
+    yerr = cat["vpec_err"]
+    if max_yerr_sigma > 0:
+        small_err = yerr < max_yerr_sigma * sigma_main
+        best = best & small_err
+    else:
+        small_err = np.ones(yval.size, dtype=bool)
     if yaxis == "sigma":
         yval = yval / sigma_main
         yerr = yerr / sigma_main
@@ -308,10 +382,11 @@ def phase_space(
     # need to convert z_main into colors using a normalized cmap for this to work
     cnorm = Normalize(vmin=0, vmax=0.5)
     colors = cnorm(z_main)
+    print("colors =", np.sort(colors))
+    print()
     if isinstance(cmap, str):
         cmap = plt.get_cmap(cmap)
     colors = cmap(colors)
-    # plot_version =
     ax.scatter(
         cat["dist (r200)"][mask & photz],
         yval[mask & photz],
@@ -324,25 +399,39 @@ def phase_space(
         c=colors[mask & photz],
         alpha=0.5,
     )
+    if small_err.sum() > 0:
+        m = mask & specz & ~small_err
+        ax.scatter(
+            cat["dist (r200)"][m],
+            yval[m],
+            s=s_factor * (cat["r200"] / r200_main)[m] ** 2 / 30,
+            edgecolors=colors[m],
+            facecolors="None",
+            lw=1,
+            alpha=0.5,
+        )
+        # show uncertainties for a small fraction of these
+        m = m & (np.abs(yval) < 6)
+        for d, v, ve, color in zip(cat["dist (r200)"][m], yval[m], yerr[m], colors[m]):
+            if rdm.uniform() > 0.9:
+                ax.errorbar(d, v, ve, fmt=",", color=color, alpha=0.5, lw=2)
     im = ax.scatter(
-        cat["dist (r200)"][mask & specz],
-        yval[mask & specz],
-        s=s_factor * (cat["r200"] / r200_main)[mask & specz] ** 2 / 30,
-        c=z_main[mask & specz],
+        cat["dist (r200)"][best],
+        yval[best],
+        s=s_factor * (cat["r200"] / r200_main)[best] ** 2 / 30,
+        c=colors[best],
         lw=0,
         alpha=0.5,
     )
-    # show uncertainties
-    rdm = np.random.default_rng(seed=1)
-    for m, d, v, ve, color in zip(mask & specz, cat["dist (r200)"], yval, yerr, colors):
-        if not m:
-            continue
-        if rdm.uniform() < 0.1:
-            ax.errorbar(d, v, ve, fmt=",", color=color, alpha=0.5, lw=2)
+    # show uncertainties for the "best" sample
+    # for d, v, ve, color in zip(
+    #     cat["dist (r200)"][best], yval[best], yerr[best], colors[best]
+    # ):
+    #     if rdm.uniform() < 1:
+    #         ax.errorbar(d, v, ve, fmt=",", color=color, alpha=0.5, lw=2)
+
     # escape velocities
     r = np.linspace(0, 10, 1001)[1:]
-    # m200_ref = np.array([3e14, 1e15])
-    # z_ref = np.array([0.05, 0.25, 0.5])[:, None]
     for m200_ref, z_ref, color in zip(
         np.array([[3e14], [1e15]]), np.array([[0.05], [0.25]]), ("C3", "C0")
     ):
@@ -373,19 +462,8 @@ def phase_space(
             # vesc[np.isnan(vesc)] = 0
             return vesc
 
-        #
-        # print("vesc =", vesc(rx[:, None]), vesc(rx[:, None]).shape)
-        # the 1/sqrt(3) converts from 3d to 1d velocity.
-        # How to convert r -> r_proj?
         ax.plot(r, vesc(rx[:, None]) / sigma_ref, f"{color}-", lw=1.5)
         ax.plot(r, -vesc(rx[:, None]) / sigma_ref, f"{color}-", lw=1.5)
-        # print("projecting")
-        # print("rx =", rx.shape)
-        # vesc_proj = project(vesc, rx)
-        # print("proj =", vesc_proj, vesc_proj.shape)
-        # sys.exit()
-        # ax.plot(r, vesc_proj / sigma_ref, f"{color}--", lw=1.5)
-        # ax.plot(r, -vesc_proj / sigma_ref, f"{color}--", lw=1.5)
     # use this to find the size that gives a radius of 1 in data units
     # ax.scatter(1, -3, s=34000, c="k")
     # ax.grid()
@@ -405,11 +483,11 @@ def phase_space(
                 (2 * np.pi) ** 0.5 * ye
             )
             print("h =", h.shape)
-            h_lowz = np.mean(h[:, mask & specz & ~evol], axis=1)
+            h_lowz = np.mean(h[:, best & ~evol], axis=1)
             hax.plot(h_lowz, vbins, "C3-", label="Low-z")
-            h_evol = np.mean(h[:, mask & specz & evol], axis=1)
+            h_evol = np.mean(h[:, best & evol], axis=1)
             hax.plot(h_evol, vbins, "C0-", label="Evolution")
-            h_all = np.mean(h[:, mask & specz], axis=1)
+            h_all = np.mean(h[:, best], axis=1)
             hax.plot(h_all, vbins, "k--", label="All")
             hax.legend(loc="lower right", fontsize=14)
             hmax = h_lowz.max()
@@ -436,10 +514,18 @@ def phase_space(
         hax.xaxis.set_major_locator(ticker.MultipleLocator(hmax / 2))
         hax.set_xticklabels([])
         hax.set_xlim(0, hax.get_xlim()[1])
-        cbar = plt.colorbar(im, ax=axes, orientation="horizontal", location="top")
+        cbar = plt.colorbar(
+            cm.ScalarMappable(cnorm, cmap),
+            ax=axes,
+            orientation="horizontal",
+            location="top",
+        )
+        cbar.solids.set(alpha=0.5)
+        cbar.ax.set_xlim(0, 0.45)
         cbar.ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
     else:
         cbar = plt.colorbar(im, ax=ax)
+        cbar.ax.set_ylim(0, 0.45)
         cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
     cbar.set_label("Main cluster redshift")
     ax.axhline(0, color="k", lw=1, ls="--")
@@ -458,7 +544,7 @@ def phase_space(
     if show_histogram:
         output = f"{output}_hist"
 
-    savefig(f"{output}_v4.pdf", fig=fig, tight=False)
+    savefig(f"{output}_v5.pdf", fig=fig, tight=False)
     return
 
 
@@ -911,7 +997,9 @@ def find_subclusters(
         base_cols=("mem_match_id", "ra", "dec", "best_z"),
         masscol="lambda",
     )
-    cat.catalog = cat[cat["z"] > 0.001]
+    cat.catalog = cat[(cat["z"] > 0.001) & (cat["z"] < 0.8)]
+    cat.catalog.sort("z")
+    print(cat)
     print(f"Loaded eromapper in {time()-ti:.1f} s")
     # photoz uncertaintes
     zbins = np.arange(0, 0.51, 0.02)
@@ -923,7 +1011,6 @@ def find_subclusters(
         statistic="median",
         bins=(lambins, zbins),
     ).statistic
-    print(zerr.shape)
     zerr = zerr / ((zbins[:-1] + zbins[1:]) / 2)
     fig, ax = plt.subplots()
     im = ax.pcolormesh(zbins, lambins, zerr, cmap="Reds")
@@ -948,7 +1035,7 @@ def find_subclusters(
         "dist (Mpc)",
         "dist (r200)",
         "vpec (km/s)",
-        # "vpec_err",
+        "vpec_err",
         "is_main",
     ]
     matches = {key: [] for key in cols}
@@ -969,10 +1056,18 @@ def find_subclusters(
         total=chances.size,
     ):
         dz_int = (dv_max / c.c * (1 + z)).to(1)
-        # dz_max = (dz_int**2 + dz_phot**2) ** 0.5
-        # dz_max = dz_phot
         dz_max = dz_int
         jz = np.abs(cat.z - z) < dz_max
+        # if z < 0.05:
+        #     fig, ax = plt.subplots(layout="constrained")
+        #     ax.plot(cat["z"], cat.z - z, "k.")
+        #     ax.plot(cat["z"][jz], cat.z[jz] - z, "C1,")
+        #     ax.axhline(dz_max, ls="--")
+        #     ax.axvline(z, ls=":")
+        #     ax.set(xlabel="Redshift", ylabel="z - z_cl")
+        #     fig.savefig("plots/test_dzmax.png")
+        #     plt.close(fig=fig)
+        #     sys.exit()
         sep = coord.separation(cat.coords)
         close = jz & (sep < 5 * d200 * u.arcmin)
         matches["chances"].extend([cl] * close.sum())
@@ -986,8 +1081,8 @@ def find_subclusters(
         matches["dist (arcmin)"].extend(arcmin)
         matches["dist (r200)"].extend(dist_r200)
         matches["dist (Mpc)"].extend(dist)
-        matches["vpec (km/s)"].extend(299792.5 * (cat["z"][close] - z) / (1 + z))
-        # matches["vpec_err"].extend(299792.5 * )
+        matches["vpec (km/s)"].extend(light * (cat["z"][close] - z) / (1 + z))
+        matches["vpec_err"].extend(light * cat["best_zerr"][close] / (1 + z))
         main_candidates = dist_r200 < 1
         if close.sum() > 0 and np.any(main_candidates):
             is_main = main_candidates & (rich == rich[main_candidates].max())
@@ -998,6 +1093,18 @@ def find_subclusters(
     matches = Table(matches)
     matches.rename_column("z", "best_z")
     matches = add_r200(matches)
+    matches["vdisp (km/s)"] = np.exp(
+        6.46
+        + 0.365
+        * np.log(matches["lambda"] * cosmo.H(matches["best_z"]) / cosmo.H0 / 47.2)
+    )
+    # updating vpec errors for these. z_boot and photo_z already have this contribution
+    cgz = matches["best_z_type"] == "cg_spec_z"
+    test = matches["vpec_err"][cgz]
+    # these have only one spec-z so sqrt(N) = 1
+    matches["vpec_err"][cgz] = (
+        matches["vpec_err"][cgz] ** 2 + matches["vdisp (km/s)"][cgz] ** 2
+    ) ** 0.5
     matches.sort(["chances", "dist (arcmin)"])
     for col in ("ra", "dec"):
         matches[col].format = ".5f"

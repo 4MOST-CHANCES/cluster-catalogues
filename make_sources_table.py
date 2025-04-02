@@ -4,7 +4,7 @@ import numpy as np
 
 def main(sample):
     if sample == "lowz":
-        date = "20240725"
+        date = "20250120"
     elif sample == "evolution":
         date = "20240725"
     filename = f"catalogues/clusters_chances_{sample}_{date}_large.csv"
@@ -27,6 +27,7 @@ def main(sample):
         for fac in cat.meta["comments"][jf].split()[1:]
     }
     rows = []
+    total = 0
     for i, p in enumerate(priorities):
         if "(" in p:
             p, zlim = p[:-1].split("(")
@@ -34,8 +35,10 @@ def main(sample):
             priorities[i] = f"{p} (${zmin} < z \leq {zmax}$)"
         matches = len([j for j, m in enumerate(cat[f"m200_{p}"]) if m > 0])
         primary = (cat["source"] == p).sum()
+        total += primary
         row = f"{p:<12s} & {factors.get(p, '1.0')} & {matches} & {primary} \\\\"
         print(row)
+    print(f"Total: {total} clusters")
     print("-----")
 
 
