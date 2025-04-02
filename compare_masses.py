@@ -13,8 +13,6 @@ import sys
 
 from plottery.plotutils import savefig, update_rcParams
 
-from linmix import LinMix
-
 from astro.clusters import ClusterCatalog
 from lnr import to_linear, to_log, mle
 
@@ -514,9 +512,7 @@ def fit_and_plot(
     return
 
 
-def fit_mass_ratio(
-    mass_x, mass_y, emass_y=None, emass_x=None, p0=(1, 1), use_linmix=False
-):
+def fit_mass_ratio(mass_x, mass_y, emass_y=None, emass_x=None, p0=(1, 1)):
     x = np.log10(mass_x)
     y = np.log10(mass_y)
     mask = np.isfinite(x) & np.isfinite(y)
@@ -539,8 +535,6 @@ def fit_mass_ratio(
             + to_log(mass_x, emass_x, which="upper")[1]
         ) / 2
         ex = ex[mask]
-    if use_linmix:
-        lm = LinMix(x, y, xsig=ex, ysig=ey)
     fit, fiterr = mle(
         x, y, x1err=ex, x2err=ey, slope=1, s_int=True, start=(0.8, 0.2), logify=False
     )
