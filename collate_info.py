@@ -1040,18 +1040,12 @@ def review_missing(args, chances, psz, act, sptecs, sptsz, codex, mcxc):
 
 
 def chances_catalog(args):
-    use_final = True
     if args.sample == "lowz":
-        # file = "catalogues-ciria/S1501_clusters_final.csv"
         file = "catalogues/S1501_clusters_20241008.csv"
-        file_old = "CHANCES low-z clusters.csv"
     else:
-        # file = "catalogues-ciria/S1502_clusters_final.csv"
         file = "catalogues/S1502_clusters_202403.csv"
-        file_old = "CHANCES Evolution clusters.csv"
     cat = ascii.read(file, format="csv", comment="#")
     print(np.sort(cat.colnames))
-    cat_old = ascii.read(file_old, format="csv", comment="#")
     cat.rename_column("m200", "m200_listed")
     # happens in low-z
     if "col12" in cat.colnames:
@@ -1061,36 +1055,7 @@ def chances_catalog(args):
         cols = ["Cluster name", "RA (J2000)", "Dec (J2000)", "z"]
     else:
         cols = ["Cluster", "RA_J2000", "Dec_J2000", "z"]
-    cols_old = ["Cluster Name", "RA_J2000", "Dec_J2000", "Z"]
     cat.rename_columns(cols, ["name", "ra", "dec", "z"])
-    cat_old.rename_columns(cols_old, ["name", "ra", "dec", "z"])
-    # if args.sample == "lowz":
-    #     # in the new files z means number of members, not redshift!
-    #     cat["z"] = [
-    #         cat_old["z"][cat_old["name"] == name][0] if name in cat_old["name"] else 1
-    #         for name in cat["name"]
-    #     ]
-    z_manual = {
-        "A0194": 0.018,
-        "A0548": 0.042,
-        "A1631": 0.046,
-        "A2415": 0.058,
-        "A2457": 0.059,
-        "A2734": 0.062,
-        "A2870": 0.024,
-        "A3341": 0.038,
-        "A3389": 0.027,
-        "A3574": 0.016,
-        "AM2002": 0.023,
-        "AS560": 0.037,
-        "IIZw108": 0.049,
-        "MZ00407": 0.022,
-    }
-    # for cl, z in z_manual.items():
-    #     cat["z"][cat["name"] == cl] = z
-    mass_manual = {"AM2002": 0.7, "MZ00407": 0.3}
-    for cl, m in mass_manual.items():
-        cat["m200_listed"][cat["name"] == cl] = m
     cat["coords"] = SkyCoord(ra=cat["ra"], dec=cat["dec"], unit="deg")
     cat.sort("name")
     for i, name in enumerate(cat["name"]):

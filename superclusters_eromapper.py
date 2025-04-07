@@ -52,10 +52,6 @@ def main():
 
     horologium = Footprint(
         "Horologium-Reticulum",
-        # original
-        # footprint=np.array([[[44, -60.4], [60, -60.4], [60, -62], [63, -62], [63, -60.4],
-        # [64.5, -60.4], [64.5, -59], [66, -59], [66, -50], [55, -50], [55, -40], [44, -40]]]))
-        # new
         footprint=np.array(
             [
                 [
@@ -82,9 +78,6 @@ def main():
     cat = load_eromapper()
     # we don't need the rest
     cat.catalog = cat[(cat["best_z"] > 0.002) & (cat["best_z"] < 0.1)]
-    print(np.sort(cat["best_z"]))
-    print(np.sort(cat["z"]))
-    return
 
     # need this first pass to find clusters in the SCs
     colors = [[0, 0, 1], [0.4, 0.4, 0.4], [1, 0, 0]]

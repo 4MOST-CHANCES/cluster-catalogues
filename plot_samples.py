@@ -32,9 +32,9 @@ def main():
         comment="#",
     )
     plot_sample("lowz", lowz, other=None, south=True)
-    # plot_sample("evolution", evol, color="C0", south=True)
-    # plot_sample("lowz", lowz, other=None, color_other="C0")
-    # plot_sample("evolution", evol, color="C0")
+    plot_sample("evolution", evol, color="C0", south=True)
+    plot_sample("lowz", lowz, other=None, color_other="C0")
+    plot_sample("evolution", evol, color="C0")
     return
 
 

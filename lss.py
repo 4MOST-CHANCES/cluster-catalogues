@@ -1016,8 +1016,8 @@ def find_subclusters(
     im = ax.pcolormesh(zbins, lambins, zerr, cmap="Reds")
     ax.set(yscale="log", xlabel="Redshift", ylabel="$\lambda$")
     plt.colorbar(im, ax=ax, label="$\Delta z_\mathrm{cl}/z_\mathrm{cl}$")
-    output = "plots/redmapper_zerr.png"
-    savefig(output, fig=fig)
+    plot_output = "plots/redmapper_zerr.png"
+    savefig(plot_output, fig=fig)
     # eromapper.catalog.rename_column("name", "index")
     cat.catalog["name"] = np.arange(cat.size, dtype=int)
     # match_name = np.chararray(eromapper.size, itemsize=100)
@@ -1115,8 +1115,8 @@ def find_subclusters(
             matches[col].format = ".2f"
     for col in ("best_z", "best_zerr"):
         matches[col].format = ".4f"
-    matches["vpec (km/s)"].format = ".0f"
-    matches["vdisp (km/s)"].format = ".0f"
+    for col in [col for col in matches.colnames if "vpec" in col or "vdisp" in col]:
+        matches[col].format = ".0f"
     print(matches)
     print(matches[matches[lambdacol] - matches[f"{lambdacol}_e"] >= 5])
     # main cluster statistics

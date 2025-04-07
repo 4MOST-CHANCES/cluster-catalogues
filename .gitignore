@@ -8,5 +8,6 @@ __pycache__
 
 aux/
 catalogues-*
+catalogues/eromapper
 paper
 plots/
