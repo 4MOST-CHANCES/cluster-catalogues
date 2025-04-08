@@ -43,7 +43,7 @@ will generate three files:
     catalogues/clusters_chances_lowz_${date}.csv
     catalogues/clusters_chances_lowz_${date}_large.csv
 
-The first two contain the same information but display it differently (with ``ascii.fixed_width`` and ``ascii.csv`` in ``astropy`` language). The last file contains all the cross-matched information (ID, redshift, original massm :math:`M_{200}`_) from all the queried public catalogues.
+The first two contain the same information but display it differently (with ``ascii.fixed_width`` and ``ascii.csv`` in ``astropy`` language). The last file contains all the cross-matched information (e.g., ID, redshift, M200) from all the queried public catalogues.
 
 Figures
 -------
